@@ -47,7 +47,10 @@ class _Dashboard:
 
     async def async_load(self, force):
         if self._config is None:
-            raise sys.modules["homeassistant.exceptions"].HomeAssistantError("no config")
+            raise sys.modules["homeassistant.components.lovelace.const"].ConfigNotFound
+        if self._config == "broken":
+            # A YAML dashboard with a syntax error.
+            raise sys.modules["homeassistant.exceptions"].HomeAssistantError("bad YAML")
         return self._config
 
 
@@ -124,6 +127,36 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
             reason = await self._reason({"d": _cards({"type": card_type})})
             self.assertIn(card_type, reason)
 
+    async def test_card_feature_with_a_like_name_stops_nothing(self) -> None:
+        # The feature of a water heater is no water card. A prefix of a type is no test.
+        card = {
+            "type": "tile",
+            "entity": "light.hall",
+            "features": [{"type": "water-heater-operation-modes"}, {"type": "power-total"}],
+        }
+        self.assertIn("light.hall", await _entities({"d": _cards(card)}))
+        custom = {"type": "custom:chart-card", "series": [{"type": "power-flow", "entity": "light.hall"}]}
+        self.assertIn("light.hall", await _entities({"d": _cards(custom)}))
+
+    async def test_key_strategy_in_a_card_or_an_action_is_no_strategy(self) -> None:
+        # The frontend reads the key only at a dashboard, a view and a section.
+        button = {
+            "type": "button",
+            "entity": "light.hall",
+            "tap_action": {"action": "perform-action", "data": {"strategy": "eco"}},
+        }
+        custom = {"type": "custom:charger-card", "entity": "light.second", "strategy": "solar"}
+        found = await _entities({"d": _cards(button, custom)})
+        self.assertLessEqual({"light.hall", "light.second"}, found)
+
+    async def test_dashboard_that_cannot_be_loaded_is_left_out(self) -> None:
+        # A YAML dashboard with a syntax error shows nothing, and the browser makes no card
+        # for it. The group stays narrowed to its other dashboard.
+        plain = _cards({"type": "tile", "entity": "light.hall"})
+        found = await _entities({"plain": plain, "yaml": "broken"})
+        self.assertIn("light.hall", found)
+        self.assertIn("can be loaded", await self._reason({"yaml": "broken"}))
+
     async def test_badge_of_the_energy_settings(self) -> None:
         dashboard = {"views": [{"badges": [{"type": "gas-total"}], "cards": []}]}
         self.assertIn("gas-total", await self._reason({"d": dashboard}))
@@ -181,6 +214,11 @@ class EntityScanTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_tile_card_of_a_person_gives_each_zone(self) -> None:
         card = {"type": "tile", "entity": "person.anna"}
+        self.assertIn("zone.work", await _entities({"d": _cards(card)}))
+
+    async def test_tile_card_of_a_device_tracker_gives_each_zone(self) -> None:
+        # The tile card gives a device tracker the same zone badge as a person.
+        card = {"type": "tile", "entity": "device_tracker.phone"}
         self.assertIn("zone.work", await _entities({"d": _cards(card)}))
 
     async def test_map_card_that_shows_all(self) -> None:

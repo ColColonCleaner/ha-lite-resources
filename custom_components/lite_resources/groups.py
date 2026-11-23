@@ -164,30 +164,52 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
     with another layout gives an empty list. The read catches each exception, because the
     layout of an internal can change in any way.
     """
+    return search_state_subscriptions(bus)[0]
+
+
+def search_state_subscriptions(bus: Any) -> tuple[list[tuple[Any, int]], int]:
+    """Return the state subscriptions for all entities, and a count of unreadable listeners.
+
+    The first value is that of unfiltered_state_subscriptions. The second value counts the
+    listeners of the function CORE_FORWARD_FUNCTION whose arguments do not have the layout
+    that this search knows. A count above zero means that Home Assistant passes that
+    function in another way, so the search can miss a subscription.
+    """
     found: list[tuple[Any, int]] = []
+    unreadable = 0
     try:
         listeners = list(bus._listeners.get(EVENT_STATE_CHANGED, ()))
     except Exception:  # an event bus of another layout
-        return found
+        return found, unreadable
     for item in listeners:
         try:
             target = item[0].target
+            func = getattr(target, "func", target)
             if (
-                not isinstance(target, functools.partial)
-                or getattr(target.func, "__name__", None) != CORE_FORWARD_FUNCTION
-                or getattr(target.func, "__module__", None) != CORE_FORWARD_MODULE
+                getattr(func, "__name__", None) != CORE_FORWARD_FUNCTION
+                or getattr(func, "__module__", None) != CORE_FORWARD_MODULE
             ):
                 continue
-            send_message, entity_ids, entity_filter, _user, message_id = target.args[:5]
-            if entity_ids is not None or entity_filter is not None:
-                continue
-            connection = send_message.__self__
-            msg_id = int(message_id)
-            if msg_id in connection.subscriptions:
-                found.append((connection, msg_id))
-        except Exception:  # a listener of another layout
+        except Exception:  # a listener of another layout, and not of that function
             continue
-    return found
+        try:
+            if not isinstance(target, functools.partial) or target.keywords:
+                raise TypeError("the listener is no partial with positional arguments")
+            # Exactly these five arguments. One more or one less shifts their places.
+            send_message, entity_ids, entity_filter, _user, message_id = target.args
+            connection = send_message.__self__
+            if not isinstance(message_id, bytes) or not isinstance(
+                entity_ids, (set, frozenset, type(None))
+            ):
+                raise TypeError("an argument has another type")
+            msg_id = int(message_id)
+            subscriptions = connection.subscriptions
+        except Exception:  # the function is there, and its arguments are not as expected
+            unreadable += 1
+            continue
+        if entity_ids is None and entity_filter is None and msg_id in subscriptions:
+            found.append((connection, msg_id))
+    return found, unreadable
 
 
 def adoption_fault(bus: Any) -> str | None:
@@ -290,6 +312,9 @@ class LiveSubscriptions:
         self._live.pop(key, None)
         if wanted is None:
             return True
+        # The page is in the table before the removal goes out, so a failure of that
+        # message leaves no narrowed listener that the table does not know.
+        self._track(_Live(live.connection, live.msg, wanted))
         removed = live.entities - wanted
         if removed:
             live.connection.send_message(
@@ -299,7 +324,6 @@ class LiveSubscriptions:
                     "event": {ENTITY_EVENT_REMOVE: sorted(removed)},
                 }
             )
-        self._track(_Live(live.connection, live.msg, wanted))
         return True
 
     def adopt(
@@ -336,6 +360,7 @@ class LiveSubscriptions:
                 return False
         if not self._replace(connection, msg, wanted):
             return False
+        self._track(_Live(connection, msg, wanted))
         removed = frozenset(held) - wanted
         if removed:
             connection.send_message(
@@ -345,7 +370,6 @@ class LiveSubscriptions:
                     "event": {ENTITY_EVENT_REMOVE: sorted(removed)},
                 }
             )
-        self._track(_Live(connection, msg, wanted))
         return True
 
     def _replace(

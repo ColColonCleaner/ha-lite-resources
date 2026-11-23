@@ -75,10 +75,16 @@ async def _async_group_schema(
     The state filter of a new group is on. A stored group with no such value does not
     narrow the states, so its form shows the filter as off.
     """
+    all_users = [u for u in await hass.auth.async_get_users() if not u.system_generated]
     users = [
-        SelectOptionDict(value=u.id, label=u.name or u.id)
-        for u in await hass.auth.async_get_users()
-        if not u.system_generated and u.is_active
+        SelectOptionDict(value=u.id, label=u.name or u.id) for u in all_users if u.is_active
+    ]
+    # A stored user that is not active any more exists, so the form shows its name.
+    not_active = {u.id: u.name or u.id for u in all_users if not u.is_active}
+    users += [
+        SelectOptionDict(value=user_id, label=f"{not_active[user_id]} (not active)")
+        for user_id in current.get(CONF_USERS) or []
+        if user_id in not_active
     ]
     users = _with_stored(users, current.get(CONF_USERS), "{} (user not found)")
     dashboards = []

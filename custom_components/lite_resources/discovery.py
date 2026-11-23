@@ -27,11 +27,41 @@ AREA_CONTROLS_FEATURE = "area-controls"
 STRATEGY_KEY = "strategy"
 # Core cards and badges that find their entities by themselves, in a way that no rule of
 # this module follows. The home-summary card filters each entity by domain and area
-# (src/panels/lovelace/cards/hui-home-summary-card.ts). The energy, water, power and gas
-# cards and badges take their entities from the energy settings
-# (src/panels/lovelace/cards/energy/, cards/water/ and badges/energy/).
-UNSCOPED_TYPES = frozenset({"home-summary"})
-UNSCOPED_PREFIXES = ("energy-", "water-", "power-", "gas-")
+# (src/panels/lovelace/cards/hui-home-summary-card.ts). The energy, water and power cards
+# and the three total badges take their entities from the energy settings. The names are
+# those of src/panels/lovelace/create-element/create-card-element.ts and
+# create-badge-element.ts of the frontend 20261028.5. A prefix is no test: the card feature
+# "water-heater-operation-modes" is none of these.
+UNSCOPED_TYPES = frozenset(
+    {
+        "home-summary",
+        "energy-carbon-consumed-gauge",
+        "energy-compare",
+        "energy-date-selection",
+        "energy-devices-detail-graph",
+        "energy-devices-graph",
+        "energy-distribution",
+        "energy-gas-graph",
+        "energy-grid-balance",
+        "energy-grid-neutrality-gauge",
+        "energy-sankey",
+        "energy-self-sufficiency-gauge",
+        "energy-solar-consumed-gauge",
+        "energy-solar-graph",
+        "energy-sources-table",
+        "energy-usage-graph",
+        "energy-water-graph",
+        "power-sankey",
+        "power-sources-graph",
+        "water-flow-sankey",
+        "water-sankey",
+        "gas-total",
+        "power-total",
+        "water-total",
+    }
+)
+# The features of a card have type names of their own, so no card type is read there.
+FEATURES_KEY = "features"
 # The map card shows each entity of some domains for two of its options
 # (src/panels/lovelace/cards/hui-map-card.ts): `geo_location_sources` gives each
 # geo_location entity, and `show_all` gives each person, device_tracker and zone entity.
@@ -163,21 +193,47 @@ def area_cards(config: Any) -> list[AreaCard]:
     return found
 
 
-def unscoped_reason(nodes: Iterable[Any]) -> str | None:
-    """Return why the mappings of a dashboard do not say which entities a page needs.
+def has_strategy(config: Any) -> bool:
+    """True when the dashboard, one of its views or one of their sections has a strategy.
 
-    None means that they do. `nodes` is each mapping of the dashboard configuration.
+    The frontend reads the key only at these three places (isStrategyDashboard,
+    isStrategyView and isStrategySection). The same key in another mapping, such as an
+    option of a custom card or the data of an action, is no strategy.
     """
-    for node in nodes:
-        if not isinstance(node, dict):
+    if not isinstance(config, dict):
+        return False
+    if STRATEGY_KEY in config:
+        return True
+    views = config.get("views")
+    for view in views if isinstance(views, list) else []:
+        if not isinstance(view, dict):
             continue
-        if STRATEGY_KEY in node:
-            return "a strategy, so the browser makes the cards"
-        card_type = node.get("type")
-        if isinstance(card_type, str) and (
-            card_type in UNSCOPED_TYPES or card_type.startswith(UNSCOPED_PREFIXES)
-        ):
-            return f"the card or badge {card_type}, which finds its entities by itself"
+        if STRATEGY_KEY in view:
+            return True
+        sections = view.get("sections")
+        for section in sections if isinstance(sections, list) else []:
+            if isinstance(section, dict) and STRATEGY_KEY in section:
+                return True
+    return False
+
+
+def unscoped_reason(config: Any) -> str | None:
+    """Return why a dashboard configuration does not say which entities a page needs.
+
+    None means that it does.
+    """
+    if has_strategy(config):
+        return "a strategy, so the browser makes the cards"
+    todo = [config]
+    while todo:
+        node = todo.pop()
+        if isinstance(node, dict):
+            card_type = node.get("type")
+            if isinstance(card_type, str) and card_type in UNSCOPED_TYPES:
+                return f"the card or badge {card_type}, which finds its entities by itself"
+            todo.extend(value for key, value in node.items() if key != FEATURES_KEY)
+        elif isinstance(node, list):
+            todo.extend(node)
     return None
 
 

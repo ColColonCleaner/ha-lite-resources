@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import gzip
@@ -11,7 +12,7 @@ import re
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from homeassistant.components.lovelace.const import LOVELACE_DATA
+from homeassistant.components.lovelace.const import LOVELACE_DATA, ConfigNotFound
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
@@ -46,8 +47,11 @@ _LOGGER = logging.getLogger(__name__)
 # A dashboard string that is "custom:xxx" as a whole (cards, rows, badges, features, and
 # cards nested inside pop-ups, stacks, sections or other cards' options).
 _CUSTOM_TYPE = re.compile(r"custom:([A-Za-z0-9_.\-]+)")
-# "custom:xxx" inside a longer string, such as a template that returns a card.
-_CUSTOM_TYPE_INSIDE = re.compile(r"custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)")
+# "custom:xxx" inside a longer string, as the value of a key "type", such as a template
+# that returns a card. The same words in plain text, with no such key, name no card.
+_CUSTOM_TYPE_INSIDE = re.compile(
+    r"""type["']?\s*[:=]\s*["']custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)"""
+)
 # A dashed name this file actually registers, not every hyphenated token it
 # mentions. Mentions of another card ("button-card" inside an unrelated file)
 # must not pull that file in.
@@ -70,10 +74,21 @@ _TEMPLATE = re.compile(
 # the file.
 _CONCAT_USED = re.compile(
     rb"""(?:customElements\.define\(|(?<![A-Za-z0-9_$.])[A-Za-z_$][A-Za-z0-9_$]{0,40}\s*=)"""
-    rb"""\s*(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3"""
+    # A third piece after the two gives another name, so such a pair is no name.
+    rb"""\s*(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3(?!\s*\+)"""
 )
+# Two quoted pieces with a plus in any place. Such a name is no registration by itself. It
+# counts as a name that the file holds, for the guess of a type with no provider.
+_CONCAT_ANY = re.compile(
+    rb"""(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3(?!\s*\+)"""
+)
+# A registration whose name is no quoted text, such as the call inside a minified
+# decorator. The scan cannot see which names such a file registers.
+_DEFINE_OPAQUE = re.compile(rb"""customElements\.define\(\s*[A-Za-z_$]""")
+# The key "type" as a whole word. A key that ends in "type", such as layout_type, is the
+# option of a card and no registration.
 _CUSTOM_CARD_TYPE = re.compile(
-    rb"""type\s*:\s*["']([a-z][a-z0-9_]*(?:-[a-z0-9_]+)+)["']"""
+    rb"""(?<![A-Za-z0-9_$])type\s*:\s*["']([a-z][a-z0-9_]*(?:-[a-z0-9_]+)+)["']"""
 )
 # custom:keymaster is implemented by <ll-strategy-dashboard-keymaster>.
 _STRATEGY_TYPE = re.compile(
@@ -105,6 +120,8 @@ _GENERIC_STEMS = frozenset(
 )
 # The keys of the warnings that the log already holds.
 _WARNED: set[Any] = set()
+# The URL path of each dashboard that a scan loads now, with the number of such loads.
+LOADING: Counter[Any] = Counter()
 
 
 def _warn_once(key: Any, message: str, *args: Any) -> None:
@@ -133,8 +150,9 @@ class Resolution:
     # Needed types that no file registers in a way that the scan sees. Each file that
     # names such a type in quotes is included for it.
     guessed_types: list[str] = field(default_factory=list)
-    # Readable files with no element that the scan sees and with no file name of a card,
-    # which are not included. Such a file can work by a side effect, such as an icon set.
+    # Readable files in which the scan sees no element, which are not included. Such a
+    # file works by a side effect, such as an icon set, or it is a card that the
+    # dashboards do not use and whose registration the scan cannot see.
     excluded_without_element: list[str] = field(default_factory=list)
     dashboards: list[str] = field(default_factory=list)
 
@@ -179,7 +197,18 @@ class FileCache:
                 _LOGGER.debug("Cannot read %s: %s", candidate, err)
                 return None
             found = names_in_javascript(data, _stem_from_filename(candidate))
-            mentioned = frozenset(name.decode() for name in _QUOTED.findall(data))
+            mentioned: frozenset[str] = frozenset()
+            if _DEFINE_OPAQUE.search(data):
+                # Only such a file can register a name that the scan does not see. A file
+                # whose registrations all have a quoted name registers no other one.
+                pairs = (
+                    (left + right).decode()
+                    for _q1, left, _q2, right in _CONCAT_ANY.findall(data)
+                )
+                mentioned = frozenset(
+                    {name.decode() for name in _QUOTED.findall(data)}
+                    | {name for name in pairs if _CARDISH.match(name)}
+                )
             self._cache[candidate] = (key, found, mentioned)
             return found, mentioned
         return None
@@ -190,7 +219,12 @@ class FileCache:
         return None if read is None else read[0]
 
     def mentions(self, path: str) -> frozenset[str] | None:
-        """Return each dashed name that a file holds in quotes (runs in the executor)."""
+        """Return each dashed name that a file can register with no visible registration.
+
+        That is each name in quotes, and each name of two quoted pieces, of a file that
+        holds a registration with no quoted name. Another file gives an empty set. It runs
+        in the executor.
+        """
         read = self._read(path)
         return None if read is None else read[1]
 
@@ -399,15 +433,39 @@ async def _async_dashboard_scans(
         if dashboard is None:
             _warn_once(("no dashboard", key), "Dashboard %s not found", key)
             continue
+        url_path = getattr(dashboard, "url_path", None if key == DEFAULT_DASHBOARD else key)
+        LOADING[url_path] += 1
         try:
             config = await dashboard.async_load(False)
-        except HomeAssistantError:  # includes ConfigNotFound (empty/auto dashboard)
+        except ConfigNotFound:  # no stored configuration: the browser makes the cards
             without_config.append(key)
             continue
+        except HomeAssistantError as err:  # such as a YAML dashboard with a syntax error
+            _warn_once(
+                ("load failed", key),
+                "Dashboard %s cannot be loaded, so it is left out: %s",
+                key,
+                err,
+            )
+            continue
+        finally:
+            LOADING[url_path] -= 1
+            if LOADING[url_path] <= 0:
+                del LOADING[url_path]
         scans.append(scan_dashboard(key, config))
     if not scans and not without_config:
-        raise CannotNarrow("no dashboard of the group exists")
+        raise CannotNarrow("no dashboard of the group exists or can be loaded")
     return scans, without_config
+
+
+def is_loading(url_path: str | None) -> bool:
+    """True while a scan of this integration loads the dashboard with this URL path.
+
+    The load of a YAML dashboard can fire the update event of that dashboard by itself. An
+    event that comes during such a load is the result of the load, and the load gives the
+    new configuration, so that event needs no new scan.
+    """
+    return url_path in LOADING
 
 
 async def async_dashboard_entities(
@@ -437,7 +495,7 @@ async def async_dashboard_entities(
             "browser makes its cards"
         )
     for scan in scans:
-        reason = unscoped_reason(scan.nodes)
+        reason = unscoped_reason(scan.config)
         if reason:
             raise CannotNarrow(f"the dashboard {scan.key} holds {reason}")
 
@@ -467,9 +525,12 @@ async def async_dashboard_entities(
         # The entities that a card finds in the registries, which the text does not name.
         found |= discovered_entities(cards, platforms, entities)
         found |= area_sensor_entities(hass, cards)
-    # The badge of a person on a tile card, and a condition on the location of the user,
-    # read each zone entity.
-    if location or any(entity_id.startswith("person.") for entity_id in found):
+    # The badge of a person or of a device tracker on a tile card, and a condition on the
+    # location of the user, read each zone entity
+    # (src/panels/lovelace/cards/tile/badges/tile-badge.ts).
+    if location or any(
+        entity_id.startswith(("person.", "device_tracker.")) for entity_id in found
+    ):
         wide.add("zone")
     if wide:
         found.update(state.entity_id for state in states if state.domain in wide)
@@ -603,10 +664,10 @@ async def async_resolve(
             result.included.append(item)
             continue
         result.excluded.append(item)
-        url = item.get("url", "")
-        if not names and not stem_names_unused_card(resource_stem(url), needed):
-            # No element that the scan sees, and no file name of a card.
-            result.excluded_without_element.append(url)
+        if not names:
+            # The scan sees no element in the file. Such a file works by a side effect,
+            # or it is a card whose registration the scan cannot see.
+            result.excluded_without_element.append(item.get("url", ""))
     provided |= guessed
     result.guessed_types = sorted(guessed)
 

@@ -62,9 +62,45 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
         self.assertEqual(summary["guessed_types"], ["grid-layout"])
         self.assertEqual(summary["unresolved_types"], [])
-        # Each file that names the type in quotes is sent, because the scan cannot tell
-        # which one registers it.
-        self.assertIn("/hacsfiles/helper-row/helper-row.js", summary["included"])
+        # helper-row.js names the type too. Each of its registrations has a quoted name,
+        # so it registers no other element, and it is not sent.
+        self.assertIn("/hacsfiles/helper-row/helper-row.js", summary["excluded"])
+
+    async def test_guess_takes_each_file_that_can_hide_a_registration(self) -> None:
+        # A second bundle with a registration that the scan cannot read names the type.
+        _write(
+            self.root,
+            "other-kit/other-kit.js",
+            b'const t=t=>e=>customElements.define(t,e);const names=["grid-layout"];',
+        )
+        self.resources.append({"url": "/hacsfiles/other-kit/other-kit.js", "type": "module"})
+        summary = await self._resolve({"type": "custom:grid-layout"})
+        self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
+        self.assertIn("/hacsfiles/other-kit/other-kit.js", summary["included"])
+
+    async def test_key_that_ends_in_type_is_no_registration(self) -> None:
+        # The option of a card, such as layout_type, names a type and registers nothing.
+        _write(
+            self.root,
+            "editor-kit/editor-kit.js",
+            b'customElements.define("editor-kit", class {});const stub={layout_type:"grid-layout"};',
+        )
+        self.resources.append({"url": "/hacsfiles/editor-kit/editor-kit.js", "type": "module"})
+        summary = await self._resolve({"type": "custom:grid-layout"})
+        self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
+        self.assertIn("/hacsfiles/editor-kit/editor-kit.js", summary["excluded"])
+        self.assertEqual(summary["guessed_types"], ["grid-layout"])
+
+    async def test_name_of_two_pieces_in_a_helper_call_is_found_by_the_guess(self) -> None:
+        _write(
+            self.root,
+            "pieces/pieces.js",
+            b'const r=(t,e)=>customElements.define(t,e);r("my"+"-card",class {});',
+        )
+        self.resources.append({"url": "/hacsfiles/pieces/pieces.js", "type": "module"})
+        summary = await self._resolve({"type": "custom:my-card"})
+        self.assertIn("/hacsfiles/pieces/pieces.js", summary["included"])
+        self.assertEqual(summary["guessed_types"], ["my-card"])
 
     async def test_type_with_a_provider_takes_no_file_that_only_names_it(self) -> None:
         summary = await self._resolve({"type": "custom:layout-card"})
@@ -77,9 +113,12 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             {"type": "custom:grid-layout"},
             always_exclude=["/hacsfiles/layout-card/layout-card.js"],
         )
-        # The stem of the excluded file does not account for the type, so the guess of
-        # the other file still applies. A type of the excluded file itself gets none.
+        # The excluded file is the only one that can hide the registration of the type,
+        # so no other file is sent for it, and the type has no provider.
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["excluded"])
+        self.assertIn("/hacsfiles/helper-row/helper-row.js", summary["excluded"])
+        self.assertEqual(summary["guessed_types"], [])
+        self.assertEqual(summary["unresolved_types"], ["grid-layout"])
         summary = await self._resolve(
             {"type": "custom:layout-card"},
             always_exclude=["/hacsfiles/layout-card/layout-card.js"],
@@ -93,11 +132,23 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         self.resources.append(
             {"url": "/hacsfiles/big-camera-card/big-camera-card.js", "type": "module"}
         )
+        _write(self.root, "custom-brand-icons/custom-brand-icons.js", ICONS_JS)
+        self.resources.append(
+            {"url": "/hacsfiles/custom-brand-icons/custom-brand-icons.js", "type": "module"}
+        )
         summary = await self._resolve({"type": "tile", "entity": "light.hall"})
-        # The icon set is listed. The file with the name of a card is not.
-        self.assertEqual(summary["excluded_without_element"], ["/hacsfiles/icons/icons.js"])
-        self.assertIn("/hacsfiles/icons/icons.js", summary["excluded"])
-        self.assertIn("/hacsfiles/big-camera-card/big-camera-card.js", summary["excluded"])
+        # Each readable file in which the scan sees no element is listed, whatever its
+        # name is: an icon set, and a card that registers through a decorator.
+        self.assertEqual(
+            sorted(summary["excluded_without_element"]),
+            [
+                "/hacsfiles/big-camera-card/big-camera-card.js",
+                "/hacsfiles/custom-brand-icons/custom-brand-icons.js",
+                "/hacsfiles/icons/icons.js",
+            ],
+        )
+        for url in summary["excluded_without_element"]:
+            self.assertIn(url, summary["excluded"])
 
     async def test_custom_type_inside_a_template(self) -> None:
         card = {
@@ -107,6 +158,12 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         summary = await self._resolve(card)
         self.assertIn("layout-card", summary["needed_types"])
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
+
+    async def test_custom_type_in_plain_text_is_no_card(self) -> None:
+        card = {"type": "markdown", "content": "Do not use custom:layout-card here."}
+        summary = await self._resolve(card)
+        self.assertEqual(summary["needed_types"], [])
+        self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["excluded"])
 
     async def test_camera_with_a_webrtc_card_key_keeps_the_webrtc_script(self) -> None:
         # The live provider "auto" of the Advanced Camera Card takes webrtc-card for it.
@@ -197,6 +254,10 @@ class NamesTest(unittest.TestCase):
     def test_two_pieces_outside_a_registration_are_no_element(self) -> None:
         data = b"""el.className = "mini" + "-graph-card"; log("button" + "-card");"""
         self.assertEqual(names_in_javascript(data, "helpers"), frozenset())
+
+    def test_three_pieces_give_no_wrong_name(self) -> None:
+        data = b"""customElements.define("my"+"-big"+"-card", A);"""
+        self.assertEqual(names_in_javascript(data, "bundle"), frozenset())
 
     def test_two_pieces_in_a_registration_or_an_assignment_are_an_element(self) -> None:
         data = b"""

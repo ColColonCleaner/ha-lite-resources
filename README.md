@@ -71,7 +71,11 @@ Some dashboards do not say which entities a panel needs. A group with such a das
 
 - A dashboard with no stored configuration. Home Assistant generates such a dashboard in the browser, such as the default dashboard before its first edit.
 - A dashboard, a view or a section with a **strategy**. The browser makes its cards.
-- The **home-summary** card, and the **energy**, **water**, **power** and **gas** cards and badges. They take their entities from all states or from the energy settings.
+- The **home-summary** card, the **energy**, **water** and **power** cards, and the badges **power-total**, **gas-total** and **water-total**. They take their entities from all states or from the energy settings.
+
+On a slow panel, all states are the load that this integration exists to remove. When you save such a card to a dashboard of a group, each open panel of the group gets all states at once. So look at the log, or at the preview, after you change a dashboard of a group.
+
+A custom strategy that makes custom cards names no card in the stored dashboard. Add the resource of each such card under *Always include*.
 
 Everyone else gets Home Assistant's normal behaviour. Remove the integration and everything is exactly as before: each open panel gets all states again at once.
 
@@ -179,7 +183,8 @@ The response lists each group with its users. For each group it shows the resour
 
 - `states_not_narrowed` and `resources_not_reduced` give the reason when a group gets all states or the full resource list.
 - `guessed_types` holds each card type that no file registers in a way that the scan sees. Each file that names such a type in quotes is sent.
-- `excluded_without_element` holds each readable file with no element, such as an icon set. Such a file is not sent. Add it under *Always include* when a panel needs it.
+- `excluded_without_element` holds each readable file in which the scan sees no element. Such a file is not sent. It is a file that works by a side effect, such as an icon set, or a card that the dashboards do not use. Add it under *Always include* when a panel needs it.
+- `state_entities_without_state` holds each name of the dashboards that has no state now. A state subscription holds those names too: an entity whose first state comes later, or a name with an error in a card.
 
 ## FAQ
 

@@ -110,12 +110,31 @@ def _convert_include_exclude_filter(msg: dict[str, Any]) -> SimpleNamespace:
     )
 
 
+class Unauthorized(Exception):
+    """Stand-in for homeassistant.exceptions.Unauthorized."""
+
+
 def _async_register_admin_service(
     hass, domain, service, func, schema=None, supports_response=None, **kwargs
 ) -> None:
-    """Stand-in for helpers.service.async_register_admin_service."""
-    hass.services.async_register(domain, service, func, supports_response=supports_response)
-    hass.services.admin_only.add((domain, service))
+    """Stand-in for helpers.service.async_register_admin_service.
+
+    As in Home Assistant, the registered function is a wrapper. It refuses a call whose
+    context names a user that is no administrator, and it passes the answer of the
+    function on. A call with no user in its context comes from Home Assistant itself.
+    """
+
+    async def admin_handler(call):
+        user_id = call.context.user_id
+        if user_id:
+            user = await hass.auth.async_get_user(user_id)
+            if user is None or not user.is_admin:
+                raise Unauthorized
+        return await func(call)
+
+    hass.services.async_register(
+        domain, service, admin_handler, supports_response=supports_response
+    )
 
 
 def _async_at_started(hass, at_start_cb):
@@ -164,8 +183,10 @@ def install_homeassistant_stubs() -> None:
         _default(vol, "Optional", lambda key, **kwargs: key)
         _default(vol, "Schema", lambda schema, **kwargs: schema)
 
+    lovelace_const = _module("homeassistant.components.lovelace.const")
+    _default(lovelace_const, "LOVELACE_DATA", "lovelace")
     _default(
-        _module("homeassistant.components.lovelace.const"), "LOVELACE_DATA", "lovelace"
+        _module("homeassistant.auth.permissions.const"), "POLICY_READ", "read"
     )
 
     exceptions = _module("homeassistant.exceptions")
@@ -175,6 +196,12 @@ def install_homeassistant_stubs() -> None:
             """Stand-in for the core error."""
 
         exceptions.HomeAssistantError = HomeAssistantError
+    if not hasattr(lovelace_const, "ConfigNotFound"):
+
+        class ConfigNotFound(exceptions.HomeAssistantError):
+            """Stand-in for the error of a dashboard with no stored configuration."""
+
+        lovelace_const.ConfigNotFound = ConfigNotFound
     if not hasattr(exceptions, "ConfigEntryNotReady"):
 
         class ConfigEntryNotReady(exceptions.HomeAssistantError):

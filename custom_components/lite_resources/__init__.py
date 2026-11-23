@@ -21,6 +21,7 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import (
@@ -42,6 +43,7 @@ from .const import (
     EVENT_LOVELACE_UPDATED,
     REGISTRY_EVENTS,
     REGISTRY_REFRESH_DELAY,
+    SCAN_TIMEOUT,
     SERVICE_PREVIEW,
     SUBENTRY_GROUP,
     WS_RESOURCES,
@@ -55,10 +57,16 @@ from .groups import (
     groups_from_subentries,
     groups_with_dashboard,
     legacy_group_data,
-    unfiltered_state_subscriptions,
+    search_state_subscriptions,
     users_in_two_groups,
 )
-from .resolver import CannotNarrow, FileCache, async_dashboard_entities, async_resolve
+from .resolver import (
+    CannotNarrow,
+    FileCache,
+    async_dashboard_entities,
+    async_resolve,
+    is_loading,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,6 +115,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             warned.add(key)
             _LOGGER.warning(message, *args)
 
+    # "unloaded" is True after the unload of this setup. A task of this setup that still
+    # waits at that time must change no page, and its handlers pass each message on.
+    setup_state = {"unloaded": False}
+
     def groups() -> list[Group]:
         # Read at each request, so a change of a group needs no reload.
         return groups_from_subentries(entry.subentries)
@@ -132,12 +144,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         None means that the dashboards of the group do not say which entities a page
         needs, so the states of the group are not narrowed. The set holds also each name
         with no state now, so that a page gets an entity whose first state comes after the
-        page connected. An error of the scan is raised.
+        page connected. An error of the scan is raised, and so is a scan that takes longer
+        than SCAN_TIMEOUT seconds, such as the load of a YAML dashboard from a dead share.
         """
         try:
-            return await async_dashboard_entities(
-                hass, dict(group.options), include_missing=True
-            )
+            async with asyncio.timeout(SCAN_TIMEOUT):
+                return await async_dashboard_entities(
+                    hass, dict(group.options), include_missing=True
+                )
         except CannotNarrow as err:
             warn_once(
                 ("states", group.group_id, str(err)),
@@ -154,7 +168,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connection: websocket_api.ActiveConnection,
         msg: dict[str, Any],
     ) -> None:
-        group = group_of(connection)
+        group = None if setup_state["unloaded"] else group_of(connection)
         if group is None:
             original_handler(hass, connection, msg)
             return
@@ -225,8 +239,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connection: websocket_api.ActiveConnection,
         msg: dict[str, Any],
     ) -> None:
-        # Only the frontend's unfiltered "all states" subscription is narrowed.
-        group = group_of(connection)
+        # Only the frontend's unfiltered "all states" subscription is narrowed. After the
+        # unload, another integration can still call this handler: it then changes nothing.
+        group = None if setup_state["unloaded"] else group_of(connection)
         if (
             group is None
             or not group.filter_states
@@ -247,40 +262,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async def narrowed() -> None:
             try:
-                try:
-                    entities = await entities_of(group)
-                except Exception:  # the page gets all states, as without this integration
-                    _LOGGER.exception(
-                        "Working out the entities of group %s failed; sending all states",
-                        group.name,
-                    )
-                    entities = None
-                if connection.subscriptions.get(msg_id) is not waiting:
-                    return
-                del connection.subscriptions[msg_id]
-                if entities:
+                # Under the lock of the changes. A page that starts during an update of
+                # the open pages then gets the entity set of after that update.
+                async with change_lock:
                     try:
-                        live.start(connection, msg, entities)
-                    except Exception:  # the page gets all states
+                        entities = await entities_of(group)
+                    except Exception:  # the page gets all states, as without this integration
                         _LOGGER.exception(
-                            "The narrowed state subscription of %s failed; sending "
-                            "all states",
-                            connection.user.name,
-                        )
-                        # The handler can fail after it put its listener on the event bus.
-                        half_made = connection.subscriptions.pop(msg_id, None)
-                        if half_made is not None:
-                            half_made()
-                    else:
-                        _LOGGER.debug(
-                            "%s (group %s) gets states for %d of %d entities",
-                            connection.user.name,
+                            "Working out the entities of group %s failed; sending all states",
                             group.name,
-                            len(entities),
-                            len(hass.states.async_entity_ids()),
                         )
+                        entities = None
+                    if connection.subscriptions.get(msg_id) is not waiting:
+                        # The connection closed, or the client ended the subscription
+                        # during the scan. A client that still listens gets the result of
+                        # its command. A closed connection sends nothing.
+                        connection.send_result(msg_id)
                         return
-                sub_handler(hass, connection, msg)
+                    del connection.subscriptions[msg_id]
+                    # After the unload of this setup, the page gets what Home Assistant gives.
+                    if entities and not setup_state["unloaded"]:
+                        try:
+                            live.start(connection, msg, entities)
+                        except Exception:  # the page gets all states
+                            _LOGGER.exception(
+                                "The narrowed state subscription of %s failed; sending "
+                                "all states",
+                                connection.user.name,
+                            )
+                            # The handler can fail after it put its listener on the event bus.
+                            half_made = connection.subscriptions.pop(msg_id, None)
+                            if half_made is not None:
+                                half_made()
+                        else:
+                            if _LOGGER.isEnabledFor(logging.DEBUG):
+                                _LOGGER.debug(
+                                    "%s (group %s) gets states for %d of %d entities",
+                                    connection.user.name,
+                                    group.name,
+                                    len(entities),
+                                    len(hass.states.async_entity_ids()),
+                                )
+                            return
+                    sub_handler(hass, connection, msg)
             except Exception as err:  # the page gets an error message, as from a handler
                 connection.async_handle_exception(msg, err)
 
@@ -309,12 +333,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 return False
         return True
 
+    def readable_entity_ids(user: Any) -> list[str]:
+        """Return each entity that the user can read, as the handler of Home Assistant does.
+
+        A page holds only those entities, so only they go into the removal list of an
+        adoption. A list of all entities would give a user with a narrow policy the name
+        of each entity that the policy hides.
+        """
+        entity_ids = hass.states.async_entity_ids()
+        permissions = user.permissions
+        if user.is_admin or permissions.access_all_entities(POLICY_READ):
+            return entity_ids
+        return [
+            entity_id
+            for entity_id in entity_ids
+            if permissions.check_entity(entity_id, POLICY_READ)
+        ]
+
     async def refresh_live(only: set[str] | None = None) -> None:
         """Give each open page of a lite user the entity set of its group as it is now.
 
         `only` limits the work to the pages of the groups with these IDs.
         """
         async with change_lock:
+            if setup_state["unloaded"]:
+                return
             current = groups()
             sets: dict[str, set[str] | None] = {}
             failed: set[str] = set()
@@ -328,7 +371,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         continue
                     if only is not None and group.group_id not in only:
                         continue
-                    if not await group_sets(current, sets, failed, group):
+                    scanned = await group_sets(current, sets, failed, group)
+                    if setup_state["unloaded"]:
+                        # The unload came during the scan. It gave each page all states.
+                        return
+                    if not scanned:
                         continue
                     entities = sets[group.group_id]
                     if not entities:
@@ -353,25 +400,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity. A user that joins a group holds such a subscription too.
         """
         async with change_lock:
+            if setup_state["unloaded"]:
+                return
             current = groups()
             sets: dict[str, set[str] | None] = {}
             failed: set[str] = set()
-            found = unfiltered_state_subscriptions(hass.bus)
+            found, unreadable = search_state_subscriptions(hass.bus)
             _LOGGER.debug("%d open state subscription(s) hold all entities", len(found))
+            if unreadable:
+                warn_once(
+                    "unreadable listeners",
+                    "%d state listener(s) of Home Assistant have another layout than this "
+                    "integration expects. A panel that connects before this setup, such "
+                    "as after a restart, can keep all states until it connects again",
+                    unreadable,
+                )
             for connection, msg_id in found:
                 try:
                     user = connection.user
                     group = group_for_user(current, user.id if user is not None else None)
                     if group is None or not group.filter_states:
                         continue
-                    if not await group_sets(current, sets, failed, group):
+                    scanned = await group_sets(current, sets, failed, group)
+                    if setup_state["unloaded"]:
+                        return
+                    if not scanned:
                         continue
                     entities = sets[group.group_id]
                     if not entities:
                         continue
-                    if live.adopt(
-                        connection, msg_id, hass.states.async_entity_ids(), entities
-                    ):
+                    if live.adopt(connection, msg_id, readable_entity_ids(user), entities):
                         _LOGGER.debug(
                             "%s (group %s) had a subscription to all states; it now "
                             "gets %d entities",
@@ -389,15 +447,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # is narrowed again when they do.
         await adopt_unfiltered()
 
+    # The updates that wait for the one that runs: the IDs of their groups, or "all" for
+    # an update of each group. Many events close together then give one more update, and
+    # not one update for each event.
+    wanted_updates: dict[str, Any] = {"all": False, "groups": set(), "task": None}
+
+    async def run_updates() -> None:
+        while wanted_updates["all"] or wanted_updates["groups"]:
+            only = None if wanted_updates["all"] else set(wanted_updates["groups"])
+            wanted_updates["all"] = False
+            wanted_updates["groups"] = set()
+            await update_pages(only)
+
+    @callback
+    def request_update(only: set[str] | None = None) -> None:
+        """Ask for an update of the open pages of these groups, or of each group."""
+        if setup_state["unloaded"]:
+            return
+        if only is None:
+            wanted_updates["all"] = True
+        else:
+            wanted_updates["groups"] |= only
+        task = wanted_updates["task"]
+        if task is None or task.done():
+            wanted_updates["task"] = hass.async_create_task(run_updates())
+
     @callback
     def dashboard_updated(event: Event) -> None:
         """A dashboard changed: update the open pages of the groups that show it."""
         if "url_path" not in event.data:
             # The event names no dashboard. None is the URL path of the default dashboard.
             return
-        affected = groups_with_dashboard(groups(), event.data["url_path"])
+        url_path = event.data["url_path"]
+        if is_loading(url_path):
+            # The load of a YAML dashboard by a scan of this integration fired the event.
+            # That scan has the new configuration. A new scan for it would load the file
+            # again, and a file that Home Assistant does not cache would fire with no end.
+            return
+        affected = groups_with_dashboard(groups(), url_path)
         if affected:
-            hass.async_create_task(update_pages({group.group_id for group in affected}))
+            request_update({group.group_id for group in affected})
 
     # The handle of the delayed update after a change of a registry, while it waits.
     pending_update: list[Any] = []
@@ -405,7 +494,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def run_registry_update() -> None:
         pending_update.clear()
-        hass.async_create_task(update_pages())
+        request_update()
 
     @callback
     def registry_updated(event: Event) -> None:
@@ -447,6 +536,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if group.filter_states:
                 try:
                     entities = await async_dashboard_entities(hass, options)
+                    subscribed = await async_dashboard_entities(
+                        hass, options, include_missing=True
+                    )
                 except CannotNarrow as err:
                     item["states_not_narrowed"] = str(err)
                 else:
@@ -454,6 +546,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     item["state_entities_count"] = (
                         f"{len(entities)} of {len(hass.states.async_entity_ids())}"
                     )
+                    # A state subscription holds these names too. Each one has no state
+                    # now: an entity whose first state comes later, or a name with an error.
+                    item["state_entities_without_state"] = sorted(subscribed - entities)
             response.append(item)
         return {"groups": response, "open_pages_with_narrowed_states": len(live)}
 
@@ -464,6 +559,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     def restore() -> None:
+        # From here on, a task of this setup that still waits changes no page, and a
+        # handler of this setup that another integration still calls passes each message on.
+        setup_state["unloaded"] = True
         commands = hass.data[websocket_api.DOMAIN]
         for command, own, original_pair in (
             (WS_RESOURCES, ws_resources, (original_handler, original_schema)),
@@ -474,7 +572,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else:
                 _LOGGER.warning(
                     "Another integration replaced the handler of %s after this one. "
-                    "That handler stays in place",
+                    "That handler stays in place. A call that it passes to this "
+                    "integration goes on to the handler of Home Assistant",
                     command,
                 )
         hass.services.async_remove(DOMAIN, SERVICE_PREVIEW)
@@ -484,9 +583,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # reload, the new setup narrows it again.
         for item in live.items():
             try:
-                live.update(item, None)
+                returned = live.update(item, None)
             except Exception:  # the other pages still get all states
                 _LOGGER.exception("The return of an open page to all states failed")
+                returned = False
+            # A page that ended its subscription in the meantime needs nothing.
+            if not returned and item.msg["id"] in item.connection.subscriptions:
+                user = item.connection.user
+                _LOGGER.error(
+                    "An open page of %s keeps its narrowed states until it connects again",
+                    user.name if user is not None else "an unknown user",
+                )
 
     entry.async_on_unload(restore)
     entry.async_on_unload(hass.bus.async_listen(EVENT_LOVELACE_UPDATED, dashboard_updated))

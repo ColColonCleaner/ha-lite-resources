@@ -11,19 +11,38 @@ install_homeassistant_stubs()
 
 
 class _Flow:
-    """Stand-in for the flow base classes of Home Assistant."""
+    """Stand-in for the flow base classes of Home Assistant: each result is a dict."""
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__()
 
+    def async_show_form(self, **values) -> dict:
+        return {"type": "form", **values}
+
+    def async_create_entry(self, **values) -> dict:
+        return {"type": "create_entry", **values}
+
+    def async_update_and_abort(self, entry, subentry, **values) -> dict:
+        return {"type": "abort", "subentry": subentry, **values}
+
 
 class _Selector:
-    """Stand-in for a selector: it keeps its configuration and accepts each value."""
+    """Stand-in for a selector. It keeps its configuration.
+
+    With options, it refuses a value outside them, as SelectSelector.__call__ of Home
+    Assistant does for a field with no custom value.
+    """
 
     def __init__(self, config=None) -> None:
         self.config = config or {}
 
     def __call__(self, value):
+        options = self.config.get("options") if isinstance(self.config, dict) else None
+        if options is not None:
+            allowed = {option["value"] for option in options}
+            for item in value if isinstance(value, list) else [value]:
+                if item not in allowed:
+                    raise ValueError(f"value must be one of {sorted(allowed)}")
         return value
 
 
@@ -49,6 +68,7 @@ USERS = [
     SimpleNamespace(id="u-w1", name="Workshop Kiosk 1", system_generated=False, is_active=True),
     SimpleNamespace(id="u-k", name="Kitchen Tablet", system_generated=False, is_active=True),
     SimpleNamespace(id="u-sys", name="Supervisor", system_generated=True, is_active=True),
+    SimpleNamespace(id="u-old", name="Old Panel", system_generated=False, is_active=False),
 ]
 RESOURCES = [{"url": "/local/a-card.js?v=2"}, {"url": "/local/b-card.js"}]
 
@@ -101,6 +121,27 @@ class GroupFormTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("/local/a-card.js?v=1", fields[name][1])
             self.assertIn("/local/gone.js", fields[name][1])
 
+    async def test_form_takes_its_stored_values_and_refuses_an_unknown_one(self) -> None:
+        current = {
+            "name": "Workshop",
+            "users": ["u-w1", "u-deleted", "u-old"],
+            "dashboards": ["dashboard-old"],
+        }
+        schema = await _flow._async_group_schema(_hass(), current, False)
+        defaults = {str(key): key.default() for key in schema.schema}
+        self.assertEqual(schema(dict(defaults))["users"], ["u-w1", "u-deleted", "u-old"])
+        with self.assertRaises(Exception):
+            schema({**defaults, "users": ["u-nobody"]})
+
+    async def test_stored_user_that_is_not_active_shows_its_name(self) -> None:
+        schema = await _flow._async_group_schema(_hass(), {"users": ["u-old", "u-deleted"]}, False)
+        users = next(s for key, s in schema.schema.items() if str(key) == "users")
+        labels = {option["value"]: option["label"] for option in users.config["options"]}
+        self.assertEqual(labels["u-old"], "Old Panel (not active)")
+        self.assertEqual(labels["u-deleted"], "u-deleted (user not found)")
+        # A user that is not active is no option for a group that does not hold it.
+        self.assertNotIn("u-old", (await _fields({}, True))["users"][1])
+
     async def test_label_of_a_stored_value_says_that_it_is_gone(self) -> None:
         options = _flow._with_stored([{"value": "a", "label": "A"}], ["a", "b"], "{} (not found)")
         self.assertEqual(
@@ -146,6 +187,53 @@ class GroupChecksTest(unittest.TestCase):
 
     def test_group_keeps_its_own_users_at_a_change(self) -> None:
         self.assertEqual(self._errors(self.workshop_id, users=["u-w1"]), {})
+
+
+class GroupStepsTest(unittest.IsolatedAsyncioTestCase):
+    """The two steps of the group form: add a group, and change one."""
+
+    def setUp(self) -> None:
+        self.workshop = ConfigSubentry(
+            data={"users": ["u-w1"], "dashboards": ["dashboard-workshop"]},
+            subentry_type="group",
+            title="Workshop",
+            unique_id=None,
+        )
+        entry = SimpleNamespace(subentries={self.workshop.subentry_id: self.workshop})
+        self.flow = _flow.GroupSubentryFlow()
+        self.flow.hass = _hass()
+        self.flow._get_entry = lambda: entry
+        self.flow._get_reconfigure_subentry = lambda: self.workshop
+
+    async def test_first_step_shows_the_form(self) -> None:
+        result = await self.flow.async_step_user(None)
+        self.assertEqual((result["type"], result["step_id"], result["errors"]), ("form", "user", {}))
+
+    async def test_valid_input_makes_a_group_with_a_clean_name(self) -> None:
+        values = {"name": "  Kitchen ", "users": ["u-k"], "dashboards": ["dashboard-workshop"]}
+        result = await self.flow.async_step_user(dict(values))
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(result["title"], "Kitchen")
+        # The name is the title of the group, and no part of its data.
+        self.assertEqual(result["data"], {"users": ["u-k"], "dashboards": ["dashboard-workshop"]})
+
+    async def test_input_with_an_error_shows_the_form_again(self) -> None:
+        values = {"name": "Kitchen", "users": ["u-w1"], "dashboards": ["dashboard-workshop"]}
+        result = await self.flow.async_step_user(values)
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(result["errors"], {"users": "user_in_other_group"})
+
+    async def test_change_of_a_group_shows_its_values_and_stores_the_new_ones(self) -> None:
+        form = await self.flow.async_step_reconfigure(None)
+        self.assertEqual((form["type"], form["step_id"]), ("form", "reconfigure"))
+        defaults = {str(key): key.default() for key in form["data_schema"].schema}
+        self.assertEqual(defaults["name"], "Workshop")
+        self.assertEqual(defaults["users"], ["u-w1"])
+        values = {"name": "Workshop panels", "users": ["u-w1"], "dashboards": ["dashboard-workshop"]}
+        result = await self.flow.async_step_reconfigure(values)
+        self.assertEqual(result["type"], "abort")
+        self.assertEqual(result["title"], "Workshop panels")
+        self.assertEqual(result["data"], {"users": ["u-w1"], "dashboards": ["dashboard-workshop"]})
 
 
 if __name__ == "__main__":

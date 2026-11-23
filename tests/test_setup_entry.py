@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from support import (
     ConfigSubentry,
     Event,
+    Unauthorized as _Unauthorized,
     empty_filter_part,
     install_homeassistant_stubs,
     load,
@@ -27,7 +28,7 @@ install_homeassistant_stubs()
 
 load("lite_resources.const", "const.py")
 load("lite_resources.groups", "groups.py")
-load("lite_resources.resolver", "resolver.py")
+_resolver = load("lite_resources.resolver", "resolver.py")
 _entry = load("lite_resources.entry_module", "__init__.py")
 
 # The 5000 entities of the home. The dashboards of the groups show four of them.
@@ -43,6 +44,7 @@ USERS = {
     "u-w2": "Workshop Kiosk 2",
     "u-k": "Kitchen Tablet",
     "u-phone": "Phone",
+    "u-admin": "Administrator",
 }
 
 
@@ -57,6 +59,15 @@ async def _dashboard_entities(hass, options, include_missing=False) -> set[str]:
         await asyncio.sleep(0)
     if hass.scan_error is not None:
         raise hass.scan_error
+    if hass.scan_fires_event:
+        # As the load of a YAML dashboard that Home Assistant does not cache: the load of
+        # the scan itself fires the update event of that dashboard.
+        for key in options["dashboards"]:
+            _resolver.LOADING[key] += 1
+            hass.bus.fire("lovelace_updated", {"url_path": key})
+            _resolver.LOADING[key] -= 1
+            if not _resolver.LOADING[key]:
+                del _resolver.LOADING[key]
     found = set(options.get("extra_entities", []))
     for key in options["dashboards"]:
         found |= hass.dashboard_entities[key]
@@ -64,8 +75,24 @@ async def _dashboard_entities(hass, options, include_missing=False) -> set[str]:
 
 
 async def _resolve(hass, options, cache) -> SimpleNamespace:
-    """Stand-in for resolver.async_resolve: one resource for each dashboard."""
+    """Stand-in for resolver.async_resolve: one resource for each dashboard.
+
+    `hass.resolve_error` makes it raise that error, and `hass.resolve_gaps` gives it these
+    card types with no provider.
+    """
+    if hass.resolve_error is not None:
+        raise hass.resolve_error
+    gaps = dict(hass.resolve_gaps)
     included = [{"url": f"/local/{key}.js"} for key in options["dashboards"]]
+    if gaps:
+        return SimpleNamespace(
+            included=included,
+            excluded=[],
+            unresolved_types=gaps.get("unresolved", []),
+            unverified_types=gaps.get("unverified", []),
+            guessed_types=gaps.get("guessed", []),
+            as_dict=lambda: {"included": [item["url"] for item in included]},
+        )
     return SimpleNamespace(
         included=included,
         excluded=[{"url": "/local/unused.js"}],
@@ -107,6 +134,8 @@ def _core_subscribe(hass, connection, msg) -> None:
     """
     if hass.handler_error is not None:
         raise hass.handler_error
+    if hass.narrowed_handler_error is not None and msg.get("entity_ids"):
+        raise hass.narrowed_handler_error
     msg["include"], msg["exclude"]  # noqa: B018
     call = {"user": connection.user.id, "entity_ids": msg.get("entity_ids"), "ended": False}
     hass.core_subscriptions.append(call)
@@ -137,7 +166,9 @@ class _Connection:
     """A websocket connection that records what it sends."""
 
     def __init__(self, user_id: str) -> None:
-        self.user = SimpleNamespace(id=user_id, name=USERS[user_id])
+        self.user = SimpleNamespace(
+            id=user_id, name=USERS[user_id], is_admin=True, permissions=None
+        )
         self.subscriptions: dict = {}
         self.results: list = []
         self.messages: list = []
@@ -188,8 +219,6 @@ class _Bus:
 class _Services:
     def __init__(self) -> None:
         self.registered: dict = {}
-        # The actions that only an administrator can call.
-        self.admin_only: set = set()
 
     def async_register(self, domain, name, func, supports_response=None) -> None:
         self.registered[(domain, name)] = func
@@ -212,7 +241,9 @@ class _ConfigEntries:
 class _Auth:
     async def async_get_user(self, user_id):
         name = USERS.get(user_id)
-        return SimpleNamespace(id=user_id, name=name) if name else None
+        if not name:
+            return None
+        return SimpleNamespace(id=user_id, name=name, is_admin=user_id == "u-admin")
 
 
 class _Hass:
@@ -223,7 +254,11 @@ class _Hass:
         self.include_missing: list[bool] = []
         self.scan_suspends = 0
         self.scan_error: Exception | None = None
+        self.scan_fires_event = False
         self.handler_error: Exception | None = None
+        self.narrowed_handler_error: Exception | None = None
+        self.resolve_error: Exception | None = None
+        self.resolve_gaps: dict[str, list[str]] = {}
         self.data = {
             "websocket_api": {
                 "lovelace/resources": (_core_resources, "resources schema"),
@@ -246,8 +281,8 @@ class _Hass:
     def loop(self):
         return asyncio.get_running_loop()
 
-    def async_create_task(self, coro, name=None, eager_start=False):
-        """As in Home Assistant, an eager task runs at once up to its first wait."""
+    def async_create_task(self, coro, name=None, eager_start=True):
+        """As in Home Assistant, a task is eager by default: it runs at once up to its first wait."""
         task = asyncio.Task(coro, loop=self.loop, eager_start=eager_start)
         self.tasks.append(task)
         return task
@@ -256,6 +291,17 @@ class _Hass:
         """Wait for each task that a handler or a listener started."""
         while self.tasks:
             await self.tasks.pop(0)
+
+
+def _run_unload(entry) -> None:
+    """Run the unload callbacks as Home Assistant does: the last one first."""
+    while entry.unload:
+        entry.unload.pop()()
+
+
+def _call(user_id: str | None = None) -> SimpleNamespace:
+    """A call of an action. No user in the context means a call by Home Assistant."""
+    return SimpleNamespace(context=SimpleNamespace(user_id=user_id))
 
 
 def _subscribe(hass, connection, msg_id: int = 5, **more) -> None:
@@ -444,7 +490,7 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
     async def test_preview_lists_each_group(self) -> None:
         await self._open_page("u-w1")
         preview = self.hass.services.registered[("lite_resources", "preview")]
-        response = await preview(None)
+        response = await preview(_call())
         self.assertEqual(response["open_pages_with_narrowed_states"], 1)
         workshop, kitchen = response["groups"]
         self.assertEqual(workshop["group"], "Workshop kiosks")
@@ -456,8 +502,7 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kitchen["state_entities"], ["light.k", "sensor.b"])
 
     async def test_unload_restores_the_handlers_of_home_assistant(self) -> None:
-        for func in self.entry.unload:
-            func()
+        _run_unload(self.entry)
         self.assertEqual(
             self.commands["lovelace/resources"], (_core_resources, "resources schema")
         )
@@ -598,14 +643,12 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(connection.results, [(5, None)])
         # The listener ran once. The unload does not remove it a second time.
         self.assertEqual(hass.bus.listeners["homeassistant_started"], [])
-        for func in entry.unload:
-            func()
+        _run_unload(entry)
 
     async def test_unload_before_the_start_removes_the_listener(self) -> None:
         hass, entry = await self._setup(started=False)
         self.assertEqual(len(hass.bus.listeners["homeassistant_started"]), 1)
-        for func in entry.unload:
-            func()
+        _run_unload(entry)
         self.assertEqual(hass.bus.listeners["homeassistant_started"], [])
 
     async def test_running_home_assistant_needs_no_listener(self) -> None:
@@ -617,9 +660,11 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
         _subscribe(hass, _Connection("u-k"))
         await hass.drain()
         self.assertEqual(hass.include_missing, [True])
-        # The preview lists the entities that have a state.
-        await hass.services.registered[("lite_resources", "preview")](None)
-        self.assertEqual(hass.include_missing, [True, False])
+        # The preview lists the entities that have a state, and apart from them the names
+        # of a state subscription that have none.
+        answer = await hass.services.registered[("lite_resources", "preview")](_call())
+        self.assertEqual(hass.include_missing, [True, False, True])
+        self.assertEqual(answer["groups"][0]["state_entities_without_state"], [])
 
 
 class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
@@ -652,8 +697,7 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         return connection
 
     async def _unload(self) -> None:
-        for func in self.entry.unload:
-            func()
+        _run_unload(self.entry)
         await self.hass.drain()
 
     async def test_unload_gives_each_open_page_all_states_again(self) -> None:
@@ -691,7 +735,7 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kiosk.subscriptions, {})
         self.assertEqual(self.hass.bus._listeners.get("state_changed", []), [])
         preview = self.hass.services.registered[("lite_resources", "preview")]
-        self.assertEqual((await preview(None))["open_pages_with_narrowed_states"], 0)
+        self.assertEqual((await preview(_call()))["open_pages_with_narrowed_states"], 0)
 
     async def test_page_that_waits_for_the_scan_is_narrowed(self) -> None:
         self.hass.scan_suspends = 2
@@ -794,12 +838,18 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.hass.include_missing), scans)
 
     async def test_preview_is_for_administrators_only(self) -> None:
-        self.assertIn(("lite_resources", "preview"), self.hass.services.admin_only)
+        preview = self.hass.services.registered[("lite_resources", "preview")]
+        # A kiosk user is no administrator: Home Assistant refuses its call.
+        with self.assertRaises(_Unauthorized):
+            await preview(_call("u-w1"))
+        # An administrator gets the answer, through the wrapper of Home Assistant.
+        answer = await preview(_call("u-admin"))
+        self.assertEqual(answer["groups"][0]["group"], "Workshop kiosks")
 
     async def test_preview_says_why_a_group_is_not_narrowed(self) -> None:
         self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
         preview = self.hass.services.registered[("lite_resources", "preview")]
-        (group,) = (await preview(None))["groups"]
+        (group,) = (await preview(_call()))["groups"]
         self.assertEqual(group["states_not_narrowed"], "the dashboard holds a strategy")
         self.assertNotIn("state_entities", group)
 
@@ -822,6 +872,149 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
             for listener in self.entry.update_listeners:
                 await listener(self.hass, self.entry)
         self.assertIn("more than one group", logs.records[0].getMessage())
+
+    async def test_task_that_waits_at_the_unload_changes_no_page(self) -> None:
+        await self._open_page("u-w1")
+        # A dashboard save starts an update, and its scan waits.
+        self.hass.scan_suspends = 2
+        self.hass.dashboard_entities["dashboard-workshop"] = {"sensor.a", "sensor.c"}
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        # A second page subscribes in that time, and waits behind that update.
+        late = _Connection("u-w2")
+        _subscribe(self.hass, late, 6)
+        _run_unload(self.entry)
+        await self.hass.drain()
+        # The unload is the last word on each page: all states, as without the integration.
+        (live,) = self._live("u-w1")
+        self.assertIsNone(live["entity_ids"])
+        (live,) = self._live("u-w2")
+        self.assertIsNone(live["entity_ids"])
+        self.assertEqual(late.results, [(6, None)])
+
+    async def test_handler_of_an_unloaded_setup_passes_each_message_on(self) -> None:
+        # Another integration can keep the handler of this setup and call it later.
+        handler, schema = self.hass.data["websocket_api"]["subscribe_entities"]
+        await self._unload()
+        late = _Connection("u-w1")
+        handler(self.hass, late, schema({"id": 5, "type": "subscribe_entities"}))
+        await self.hass.drain()
+        (call,) = self._calls("u-w1")
+        self.assertIsNone(call["entity_ids"])
+
+    async def test_client_that_unsubscribes_during_the_scan_gets_its_result(self) -> None:
+        self.hass.scan_suspends = 1
+        client = _Connection("u-w1")
+        _subscribe(self.hass, client)
+        # As the unsubscribe command of Home Assistant: it takes the entry out and calls it.
+        client.subscriptions.pop(5)()
+        await self.hass.drain()
+        self.assertEqual(client.results, [(5, None)])
+        self.assertEqual(self._calls("u-w1"), [])
+
+    async def test_event_from_the_scan_itself_starts_no_new_scan(self) -> None:
+        await self._open_page("u-w1")
+        self.hass.scan_fires_event = True
+        scans = len(self.hass.include_missing)
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        for _turn in range(50):
+            await asyncio.sleep(0)
+        await self.hass.drain()
+        self.assertEqual(len(self.hass.include_missing), scans + 1)
+
+    async def test_many_saves_close_together_give_few_scans(self) -> None:
+        await self._open_page("u-w1")
+        self.hass.scan_suspends = 2
+        scans = len(self.hass.include_missing)
+        for number in range(20):
+            self.hass.dashboard_entities["dashboard-workshop"] = {
+                "sensor.a",
+                f"sensor.other_{number}",
+            }
+            self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.other_19"])
+        self.assertLessEqual(len(self.hass.include_missing) - scans, 2)
+
+    async def test_failed_narrowed_call_gives_the_new_page_all_states(self) -> None:
+        self.hass.narrowed_handler_error = RuntimeError("the narrowed call failed")
+        with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            kiosk = await self._open_page("u-w1")
+        (live,) = self._live("u-w1")
+        self.assertIsNone(live["entity_ids"])
+        self.assertEqual(kiosk.results, [(5, None)])
+        self.assertEqual(kiosk.errors, [])
+
+    async def test_subscription_with_a_filter_is_not_changed(self) -> None:
+        connection = _Connection("u-w1")
+        only_lights = {"domains": ["light"], "entity_globs": [], "entities": []}
+        _subscribe(self.hass, connection, include=only_lights)
+        await self.hass.drain()
+        (call,) = self._calls("u-w1")
+        self.assertIsNone(call["entity_ids"])
+        preview = self.hass.services.registered[("lite_resources", "preview")]
+        self.assertEqual((await preview(_call()))["open_pages_with_narrowed_states"], 0)
+
+    async def _resources(self, user_id: str):
+        connection = _Connection(user_id)
+        handler, _schema = self.hass.data["websocket_api"]["lovelace/resources"]
+        await handler(self.hass, connection, {"id": 1, "type": "lovelace/resources"})
+        return connection.results[-1][1]
+
+    async def test_resources_that_cannot_be_reduced_give_the_full_list(self) -> None:
+        self.hass.resolve_error = _entry.CannotNarrow("no dashboard of the group exists")
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            self.assertEqual(await self._resources("u-w1"), "every resource")
+            self.assertEqual(await self._resources("u-w2"), "every resource")
+        self.assertEqual(len(logs.records), 1)
+
+    async def test_failed_resource_scan_gives_the_full_list(self) -> None:
+        self.hass.resolve_error = RuntimeError("the scan failed")
+        with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            self.assertEqual(await self._resources("u-w1"), "every resource")
+
+    async def test_card_type_with_no_provider_is_in_the_log_one_time(self) -> None:
+        self.hass.resolve_gaps = {
+            "unresolved": ["a-card"],
+            "unverified": ["b-card"],
+            "guessed": ["c-card"],
+        }
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            await self._resources("u-w1")
+            await self._resources("u-w1")
+        self.assertEqual(len(logs.records), 3)
+
+    async def test_adoption_removes_only_the_entities_that_the_user_can_read(self) -> None:
+        # The tablet user has a policy for four entities. Its page holds only those.
+        readable = {"sensor.a", "sensor.b", "light.k", "sensor.other_1"}
+        tablet = _Connection("u-k")
+        tablet.user.is_admin = False
+        tablet.user.permissions = SimpleNamespace(
+            access_all_entities=lambda policy: False,
+            check_entity=lambda entity_id, policy: entity_id in readable,
+        )
+        _subscribe(self.hass, tablet, 7)
+        await self.hass.drain()
+        kitchen = _group("Kitchen tablet", ["u-k"], ["main-dashboard"])
+        self.entry.subentries = {**self.entry.subentries, kitchen.subentry_id: kitchen}
+        for listener in self.entry.update_listeners:
+            await listener(self.hass, self.entry)
+        await self.hass.drain()
+        # The removal names no entity that the policy hides.
+        self.assertEqual(tablet.messages[-1]["event"], {"r": ["sensor.a", "sensor.other_1"]})
+
+    async def test_listener_of_another_layout_is_reported(self) -> None:
+        # The function of Home Assistant with one more argument than this search knows.
+        odd = functools.partial(
+            _forward_entity_changes, "extra", lambda message: None, None, None, None, b"5"
+        )
+        listeners = self.hass.bus._listeners.setdefault("state_changed", [])
+        listeners.append((SimpleNamespace(target=odd), None))
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            for listener in self.entry.update_listeners:
+                await listener(self.hass, self.entry)
+            await self.hass.drain()
+        self.assertIn("another layout", logs.records[0].getMessage())
 
     async def test_setup_reports_internals_of_another_layout(self) -> None:
         hass = _Hass()

@@ -20,6 +20,9 @@ REGISTRY_EVENTS = (
 # The registries change in bursts. The open pages get one update this number of seconds
 # after the first change of a burst.
 REGISTRY_REFRESH_DELAY = 10
+# The longest time in seconds for one entity scan of a group. The changes of the open
+# pages run one after the other, so a scan with no end would hold each later change.
+SCAN_TIMEOUT = 30
 
 CONF_USERS = "users"
 CONF_DASHBOARDS = "dashboards"

@@ -2,9 +2,66 @@
 
 ## Unreleased
 
+## 0.3.6 - 2026-11-23
+
+A second independent review, of the whole code at 0.3.5, gave 35 findings: no critical one, 1 high, 6 medium and 28 low. 24 of them are in code that 0.3.5 added. This version corrects each fault that the review confirmed, and it states each limit that stays. Three findings did not hold against the source of Home Assistant 2026.11.2, and they are named at the end.
+
+### Rules of 0.3.5 that stopped the narrowing too often
+
+- **A card feature with a like name no longer stops the narrowing of its group. (high)** 0.3.5 took each `type` that starts with `energy-`, `water-`, `power-` or `gas-` as a card of the energy settings, in each mapping of a dashboard. The feature `water-heater-operation-modes` of a tile card is none of these, and one such feature gave each panel of the group all states. The rule now holds the exact card and badge types of the frontend, and it reads no type inside the features of a card.
+- **The key `strategy` counts only where the frontend reads it.** 0.3.5 took that key in each mapping as a strategy, also as the option of a custom card or in the data of an action. It now counts at the dashboard, at a view and at a section.
+- **A dashboard that cannot be loaded is left out.** 0.3.5 took each load error as a dashboard with no stored configuration, so one YAML dashboard with a syntax error stopped the narrowing of its group. Only a dashboard with no stored configuration does that now. Another load error leaves the dashboard out, with one warning that gives the error.
+
+### The state stream of an open page
+
+- **A task that still waits at the unload changes no page.** The unload returned each page to all states, and a task of the old setup that waited on a scan then narrowed the page again, into a table that nothing updated. After a removal the page stayed narrowed. After a reload the new setup did not find it. The unload now sets a flag, and each task and each handler of that setup reads it after each wait.
+- **A handler of an unloaded setup passes each message on.** When another integration keeps the handler of this one and calls it after the unload, the handler now gives the message to the handler of Home Assistant.
+- **An update event that the scan itself causes starts no new scan.** The load of a YAML dashboard can fire the update event of that dashboard. For a file that Home Assistant does not cache, such as an empty file or a file with a time in the future, each scan fired an event and each event started a scan, with no end. An event that comes while a scan of this integration loads that dashboard is now left out.
+- **Many events close together give one more update.** Each save of a dashboard started its own update, and 20 saves gave 20 scans. An update that runs now takes each later request with it.
+- **A new page waits for an update that runs.** The first subscription of a page ran apart from the updates of the open pages, so a page that started during a save could keep the older entity set.
+- **One entity scan has a time limit of 30 seconds.** The changes of the open pages run one after the other. A dashboard load with no end, such as a YAML file on a dead share, held each later change.
+- **A client that ends its subscription during the scan gets the result of its command.** Before, that command got no answer.
+- **The removal list of an adoption holds only entities that the user can read.** It held each entity of Home Assistant, so a user with a narrow policy learned the name of each entity that the policy hides.
+- **A page is in the table of open pages before its removal message goes out.** A failure of that message could leave a narrowed listener that the table did not know.
+- **The log names each state listener that the adoption cannot read.** The check of 0.3.5 saw two layout changes only. The search now accepts only the exact five arguments that it knows, and it counts each listener of the function of Home Assistant with another layout. The log holds one warning with that count.
+- **The log names a page that keeps its narrowed states at the unload**, when the return to all states fails for it.
+
+### The entities and the resources
+
+- **A tile card of a device tracker gets each zone**, as a tile card of a person does.
+- **`custom:` in plain text is no card.** 0.3.5 took each `custom:name` inside a longer string as a card of the dashboard, also in the text of a markdown card. It now needs the key `type` before it, as in a template that returns a card.
+- **A key that ends in `type` is no registration.** The scan of a file took `layout_type:"grid-layout"` as a registration of `grid-layout`. That false provider was sent, and it stopped the search for the real file of a type.
+- **The guess for a type with no provider takes fewer files.** It took each file that names the type in quotes. It now takes only a file with a registration that the scan cannot read, such as the call inside a minified decorator. A file whose registrations all have a quoted name registers no other element.
+- **A name of two quoted pieces in a helper call is found by that guess.** 0.3.5 dropped such a pair outside a registration and an assignment, so a bundle that registers `"my"+"-card"` through a helper lost its card.
+- **A name of three quoted pieces gives no wrong name.** The scan joined the first two pieces.
+- **The preview lists each file with no element, whatever its name is.** 0.3.5 left out each file with a hyphen or with six or more characters in its name, so an icon set such as `custom-brand-icons.js` did not show. The list now holds also a card that the dashboards do not use and whose registration the scan cannot see.
+- **The preview lists the names with no state.** A state subscription holds each name of the dashboards, also one with no state now. The preview showed only the entities with a state. The new key `state_entities_without_state` holds the rest.
+
+### The form and the tests
+
+- A stored user that is not active shows its name with `(not active)` in the form of a group. 0.3.5 showed its ID with `(user not found)`.
+- **The stand-ins of the tests take the order and the defaults of Home Assistant.** The unload callbacks run from the last one to the first, a task starts eagerly by default, and the stand-in for the administrator check refuses a user that is no administrator and passes the answer on. The stand-in for a select field refuses a value outside its options.
+- New tests cover the two steps of the group form, the three paths of the resource handler that give the full list or a warning, a narrowed call that fails while the call for all states works, a subscription with a filter, and each correction of this version. The tests grow from 180 to 207.
+
+### Findings that did not hold
+
+- The preview action returns its answer through the administrator wrapper of Home Assistant: `_async_admin_handler` returns the answer of the function.
+- A new group and a deleted group call the update listener of the entry: `async_add_subentry` and `async_remove_subentry` both end in `_async_save_and_notify`.
+- Home Assistant refuses an entry with a higher version than the flow knows before it calls the migration.
+
+### Limits that stay
+
+- **A group that can no longer be narrowed gets all states on each open panel.** A save that adds a strategy, a home-summary card or an energy card to a dashboard gives each open panel of the group all states in one message, about 1.4 MB for 5,573 entities, and each state change after that. The log holds one warning with the reason. An unload and a reload send the same message one time.
+- **A custom strategy that makes custom cards** names no card in the stored dashboard. Add the resource of each such card under **Always include**.
+- **Each value of a short name joins each template with that name.** A minified bundle can then seem to provide a card that it does not hold, and it is sent for nothing. No real bundle showed this.
+- **Cost.** Each state subscription runs a scan of about 20 ms to 40 ms for 5,573 entities, and no result is shared between panels that connect together. A change of one entity sends each open panel of the group its whole set again.
+- The three checks against the real package do not cover the handler for `subscribe_entities` as a whole, a user that is no administrator, a state change through a new listener, or the setup of an entry. The test on a running Home Assistant covers those.
+
 ## 0.3.5 - 2026-11-23
 
 An independent review of the whole code gave 51 findings: 1 critical, 1 high, 5 medium and 44 low. This version corrects each fault that it confirmed, and it states each limit that stays. Each point is in the list below.
+
+A second review found faults in this version, and 0.3.6 corrects them. The largest one: three new rules stopped the narrowing of a group too often, so install 0.3.6 and not this version.
 
 ### The state stream of an open page
 
