@@ -54,6 +54,13 @@ Nothing is changed on disk and nothing is patched in the frontend. Lite Resource
 
 One more need has no card type. A camera of the Advanced Camera Card with `live_provider: webrtc-card` needs the script of the WebRTC Camera integration. Lite Resources keeps that script when a dashboard holds this value.
 
+Some cards name no entity, and find their entities by themselves. Lite Resources sends those entities too:
+
+- The **area card** shows the camera, the sensors, the alerts and the controls of its area. Light users get the entities of that area that the card can show.
+- The **scheduler card** shows the schedules of the scheduler integration. Light users get each schedule, and the entities that it controls.
+
+For another card of this kind, add its entities under *Extra entities*.
+
 Everyone else gets Home Assistant's normal behaviour. Remove the integration and everything is exactly as before.
 
 ## Groups

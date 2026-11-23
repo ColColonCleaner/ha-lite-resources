@@ -1,0 +1,211 @@
+"""Entities that a card finds by itself.
+
+A dashboard names most of its entities, and the resolver finds those in the text of the
+dashboard. Some cards name an area or an integration instead, and find their entities in the
+registries of Home Assistant. A user with a narrowed state stream needs those entities too.
+
+The rules of the area card follow the frontend: the card in
+src/panels/lovelace/cards/hui-area-card.ts and its feature "area-controls" in
+src/data/area/area_controls.ts. The card shows an entity of its area only when the entity
+is not hidden and has no entity category. The Home Assistant imports are inside the
+functions that need them, so that the selection logic runs in a plain unit test.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
+
+from .const import CARD_PLATFORMS
+
+AREA_CARD_TYPE = "area"
+AREA_CONTROLS_FEATURE = "area-controls"
+# The domains of the control buttons of the feature "area-controls". The name of a cover
+# control is "cover-" and its device class.
+CONTROL_DOMAINS = ("light", "fan", "switch", "cover")
+# An area card also reads these sensor classes from an attribute of entities of other domains.
+ATTRIBUTE_SENSOR_DOMAINS: dict[str, tuple[str, ...]] = {
+    "temperature": ("climate",),
+    "humidity": ("climate", "humidifier"),
+}
+
+
+@dataclass(frozen=True)
+class RegistryEntity:
+    """What the registries and the state machine hold about one entity."""
+
+    entity_id: str
+    area_id: str | None = None
+    platform: str | None = None
+    hidden: bool = False
+    category: str | None = None
+    device_class: str | None = None
+
+    @property
+    def domain(self) -> str:
+        """The domain of the entity."""
+        return self.entity_id.partition(".")[0]
+
+
+@dataclass(frozen=True)
+class AreaCard:
+    """What one area card shows of its area."""
+
+    area_id: str
+    camera: bool
+    sensor_classes: frozenset[str]
+    alert_classes: frozenset[str]
+    control_domains: frozenset[str]
+
+    def shows(self, entity: RegistryEntity) -> bool:
+        """True when the card can show this entity."""
+        if entity.area_id != self.area_id or entity.hidden or entity.category:
+            return False
+        domain = entity.domain
+        if domain == "camera":
+            return self.camera
+        if domain == "sensor":
+            return entity.device_class in self.sensor_classes
+        if domain == "binary_sensor":
+            return entity.device_class in self.alert_classes
+        if domain in self.control_domains:
+            return True
+        return any(
+            domain in ATTRIBUTE_SENSOR_DOMAINS.get(sensor_class, ())
+            for sensor_class in self.sensor_classes
+        )
+
+
+def _strings(value: Any) -> frozenset[str]:
+    """Return the strings of a configuration value that is a list or one string."""
+    if isinstance(value, str):
+        return frozenset({value})
+    if isinstance(value, list):
+        return frozenset(item for item in value if isinstance(item, str))
+    return frozenset()
+
+
+def _control_domains(card: dict[str, Any]) -> frozenset[str]:
+    """Return the domains of the control buttons of an area card."""
+    domains: set[str] = set()
+    features = card.get("features")
+    for feature in features if isinstance(features, list) else []:
+        if not isinstance(feature, dict) or feature.get("type") != AREA_CONTROLS_FEATURE:
+            continue
+        controls = feature.get("controls")
+        if not isinstance(controls, list):
+            # The feature shows each kind of control when its configuration names none.
+            domains.update(CONTROL_DOMAINS)
+            continue
+        for control in controls:
+            if isinstance(control, str):
+                domain = control.partition("-")[0]
+                if domain in CONTROL_DOMAINS:
+                    domains.add(domain)
+    return frozenset(domains)
+
+
+def _area_card(card: dict[str, Any]) -> AreaCard:
+    display = card.get("display_type") or (
+        "camera" if card.get("show_camera") else "picture"
+    )
+    return AreaCard(
+        area_id=card["area"],
+        camera=display == "camera",
+        sensor_classes=_strings(card.get("sensor_classes")),
+        alert_classes=_strings(card.get("alert_classes")),
+        control_domains=_control_domains(card),
+    )
+
+
+def area_cards(config: Any) -> list[AreaCard]:
+    """Return each area card of a dashboard configuration, at any depth."""
+    found: list[AreaCard] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == AREA_CARD_TYPE and isinstance(node.get("area"), str):
+                found.append(_area_card(node))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(config)
+    return found
+
+
+def card_platforms(custom_types: Iterable[str]) -> set[str]:
+    """Return the integrations whose entities the custom cards of a dashboard show."""
+    types = set(custom_types)
+    return {platform for card, platform in CARD_PLATFORMS.items() if card in types}
+
+
+def discovered_entities(
+    cards: Iterable[AreaCard],
+    platforms: Iterable[str],
+    entities: Iterable[RegistryEntity],
+) -> set[str]:
+    """Return the entities that the area cards and the cards of these integrations show."""
+    cards = list(cards)
+    platforms = set(platforms)
+    return {
+        entity.entity_id
+        for entity in entities
+        if entity.platform in platforms or any(card.shows(entity) for card in cards)
+    }
+
+
+def registry_entities(hass: Any) -> list[RegistryEntity]:
+    """Return each enabled entity of the entity registry, with its area and device class.
+
+    The area is that of the entity, or else the effective area of its device: a child
+    device with no area of its own has the area of its parent device. The device class is
+    the attribute of the state, which is the value that the frontend filters on.
+    """
+    from homeassistant.helpers import device_registry as dr, entity_registry as er
+
+    devices = dr.async_get(hass)
+    result: list[RegistryEntity] = []
+    for entry in er.async_get(hass).entities.values():
+        if entry.disabled:
+            continue
+        area_id = entry.area_id
+        if area_id is None and entry.device_id:
+            device = devices.async_get(entry.device_id)
+            if device is not None:
+                area_id = dr.async_get_effective_area_id(hass, device)
+        state = hass.states.get(entry.entity_id)
+        category = entry.entity_category
+        result.append(
+            RegistryEntity(
+                entity_id=entry.entity_id,
+                area_id=area_id,
+                platform=entry.platform,
+                hidden=entry.hidden,
+                category=str(getattr(category, "value", category)) if category else None,
+                device_class=state.attributes.get("device_class") if state else None,
+            )
+        )
+    return result
+
+
+def area_sensor_entities(hass: Any, cards: Iterable[AreaCard]) -> set[str]:
+    """Return the temperature and humidity entities that the areas of the cards name.
+
+    An area can name one entity for its temperature and one for its humidity. An area card
+    then shows that entity, which can belong to another area.
+    """
+    from homeassistant.helpers import area_registry as ar
+
+    areas = ar.async_get(hass)
+    found: set[str] = set()
+    for card in cards:
+        area = areas.async_get_area(card.area_id)
+        for sensor_class in ("temperature", "humidity"):
+            entity_id = getattr(area, f"{sensor_class}_entity_id", None)
+            if entity_id and sensor_class in card.sensor_classes:
+                found.add(entity_id)
+    return found

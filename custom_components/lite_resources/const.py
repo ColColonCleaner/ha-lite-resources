@@ -48,4 +48,22 @@ VALUE_HINTS: dict[str, str] = {
     "webrtc-card": "webrtc-camera",
 }
 
+# Custom cards that show the entities of one integration. The card gets the list from the
+# integration, and it reads the state of each entity from the state stream.
+# card type -> the integration whose entities the card shows.
+CARD_PLATFORMS: dict[str, str] = {
+    # Scheduler card: a schedule is a switch of the scheduler integration. The card shows
+    # an empty row for a schedule whose switch has no state.
+    "scheduler-card": "scheduler",
+}
+
+# State attributes that name other entities, which a card shows with the entity itself.
+# integration of the entity (None: any) -> the attribute.
+MEMBER_ATTRIBUTES: dict[str | None, str] = {
+    # Light groups, old-style groups and other entities with members.
+    None: "entity_id",
+    # A schedule names the entities that its actions control.
+    "scheduler": "entities",
+}
+
 SERVICE_PREVIEW = "preview"

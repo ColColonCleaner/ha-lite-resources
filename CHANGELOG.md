@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-11-23
+
+- **The area card gets the entities of its area.** An area card names an area and no entity. It finds its camera, its sensors, its alerts and its controls in the registries. Light users now receive those entities, by the rules of the card: the entity is in the area, it is not hidden, and it has no entity category. Before this version, such a card showed no light button, no temperature and no motion alert for a light user.
+- **The scheduler card gets its schedules.** Each schedule is a switch of the scheduler integration, and the card shows an empty row for a schedule with no state. Light users now receive those switches, and the entities that each schedule controls.
+
 ## 0.3.0 - 2026-11-23
 
 - **Groups of light users.** Each group has its own users, dashboards and options. So the panels of one room and a tablet of another room each get the resources and the states of their own dashboards. Add a group with **Add group** on the integration page, and change one with its reconfigure button. A user can be in one group only.

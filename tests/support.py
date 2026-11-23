@@ -97,6 +97,18 @@ def _convert_include_exclude_filter(msg: dict[str, Any]) -> SimpleNamespace:
     )
 
 
+def _effective_area_id(hass, device) -> str | None:
+    """Stand-in for device_registry.async_get_effective_area_id.
+
+    A child device with no area of its own has the area of its parent device.
+    """
+    if device.area_id:
+        return device.area_id
+    parent_id = getattr(device, "parent_device_id", None)
+    parent = hass.device_registry.async_get(parent_id) if parent_id else None
+    return parent.area_id if parent else None
+
+
 def install_homeassistant_stubs() -> None:
     """Add each missing stand-in. The order of the test files does not matter."""
     try:
@@ -149,4 +161,17 @@ def install_homeassistant_stubs() -> None:
         _module("homeassistant.helpers.entityfilter"),
         "convert_include_exclude_filter",
         _convert_include_exclude_filter,
+    )
+
+    # Each registry of a test is an attribute of its stand-in for hass.
+    for name in ("entity_registry", "device_registry", "area_registry"):
+        _default(
+            _module(f"homeassistant.helpers.{name}"),
+            "async_get",
+            lambda hass, name=name: getattr(hass, name),
+        )
+    _default(
+        _module("homeassistant.helpers.device_registry"),
+        "async_get_effective_area_id",
+        _effective_area_id,
     )

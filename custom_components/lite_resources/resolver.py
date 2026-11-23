@@ -24,7 +24,16 @@ from .const import (
     CONF_INCLUDE_UNSCANNABLE,
     DEFAULT_DASHBOARD,
     KEY_HINTS,
+    MEMBER_ATTRIBUTES,
     VALUE_HINTS,
+)
+from .discovery import (
+    AreaCard,
+    area_cards,
+    area_sensor_entities,
+    card_platforms,
+    discovered_entities,
+    registry_entities,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -251,18 +260,23 @@ async def async_all_resources(hass: HomeAssistant) -> list[dict[str, Any]]:
     return list(resources.async_items() or [])
 
 
-async def _async_dashboard_text(hass: HomeAssistant, key: str) -> str | None:
-    """Return a dashboard's config as JSON text, or None if unavailable."""
+async def _async_dashboard_config(hass: HomeAssistant, key: str) -> Any | None:
+    """Return a dashboard's config, or None if unavailable."""
     url_path = None if key == DEFAULT_DASHBOARD else key
     dashboard = hass.data[LOVELACE_DATA].dashboards.get(url_path)
     if dashboard is None:
         _LOGGER.warning("Dashboard %s not found", key)
         return None
     try:
-        config = await dashboard.async_load(False)
+        return await dashboard.async_load(False)
     except HomeAssistantError:  # includes ConfigNotFound (empty/auto dashboard)
         return None
-    return json.dumps(config)
+
+
+async def _async_dashboard_text(hass: HomeAssistant, key: str) -> str | None:
+    """Return a dashboard's config as JSON text, or None if unavailable."""
+    config = await _async_dashboard_config(hass, key)
+    return None if config is None else json.dumps(config)
 
 
 async def async_dashboard_entities(
@@ -271,7 +285,8 @@ async def async_dashboard_entities(
     """Return every entity the configured dashboards can show.
 
     Any existing entity id that appears anywhere in the dashboards' JSON (cards, pop-ups,
-    conditions, actions), the members of any groups among them, the configured extras,
+    conditions, actions), the entities that a card finds by itself (the area card, and a
+    card of CARD_PLATFORMS), the members of any groups among them, the configured extras,
     and a few the frontend uses itself.
     """
     domains = {state.domain for state in hass.states.async_all()}
@@ -283,20 +298,43 @@ async def async_dashboard_entities(
         + r")\.[a-z0-9_]+"
     )
     found: set[str] = set(BASE_ENTITIES) | set(options.get(CONF_EXTRA_ENTITIES, []))
+    cards: list[AreaCard] = []
+    platforms: set[str] = set()
     for key in options.get(CONF_DASHBOARDS, []):
-        text = await _async_dashboard_text(hass, key)
-        if text:
-            found.update(pattern.findall(text))
+        config = await _async_dashboard_config(hass, key)
+        if config is None:
+            continue
+        text = json.dumps(config)
+        found.update(pattern.findall(text))
+        cards.extend(area_cards(config))
+        platforms |= card_platforms(_CUSTOM_TYPE.findall(text))
+    # The attribute that names the members of an entity, for an entity of an integration
+    # with an attribute of its own.
+    member_attribute: dict[str, str] = {}
+    if cards or platforms:
+        # The entities that a card finds in the registries, which the text does not name.
+        entities = registry_entities(hass)
+        found |= discovered_entities(cards, platforms, entities)
+        found |= area_sensor_entities(hass, cards)
+        member_attribute = {
+            entity.entity_id: MEMBER_ATTRIBUTES[entity.platform]
+            for entity in entities
+            if entity.platform in MEMBER_ATTRIBUTES
+        }
     # add group members (light groups, old-style groups, ...), recursively
     todo = list(found)
     while todo:
-        state = hass.states.get(todo.pop())
-        members = state.attributes.get("entity_id") if state else None
-        if isinstance(members, (list, tuple)):
-            for member in members:
-                if isinstance(member, str) and member not in found:
-                    found.add(member)
-                    todo.append(member)
+        entity_id = todo.pop()
+        state = hass.states.get(entity_id)
+        if state is None:
+            continue
+        for attribute in (MEMBER_ATTRIBUTES[None], member_attribute.get(entity_id)):
+            members = state.attributes.get(attribute) if attribute else None
+            if isinstance(members, (list, tuple)):
+                for member in members:
+                    if isinstance(member, str) and member not in found:
+                        found.add(member)
+                        todo.append(member)
     return {e for e in found if hass.states.get(e) is not None}
 
 
