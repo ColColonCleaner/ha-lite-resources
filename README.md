@@ -50,9 +50,29 @@ Nothing is changed on disk and nothing is patched in the frontend. Lite Resource
 1. **Resources** - the frontend asks once per page load for the list of dashboard resources (`lovelace/resources`). Light users get only the resources their dashboards use. Lite Resources reads every dashboard you select (including one nothing links to), collects every `custom:` card type in that config (stacks, sections, conditional cards, pop-ups and features), and finds which resource files register them. A bundle that builds its element names in code is recognised too (`mushroom.js` provides `custom:mushroom-*-card`). A file is matched by its whole name, so `dreame-vacuum-card.js` is not treated as the Mushroom vacuum card and `lock-manager.js` is not treated as the Mushroom lock card. Mods with no card type are detected from dashboard keys (`card_mod` → card-mod, `kiosk_mode` → kiosk-mode).
 2. **States** (optional) - the frontend subscribes to every entity's state (`subscribe_entities`). Light users' subscription is narrowed to the entities that appear anywhere in their dashboards (cards, pop-ups, conditions, actions), plus members of any groups, plus anything you add yourself.
 
+One more need has no card type. A camera of the Advanced Camera Card with `live_provider: webrtc-card` needs the script of the WebRTC Camera integration. Lite Resources keeps that script when a dashboard holds this value.
+
 Everyone else gets Home Assistant's normal behaviour. Remove the integration and everything is exactly as before.
 
+## Groups
+
+A group holds the users that one set of panels logs in as, and the dashboards that those panels show. Each group gets the resources and the states of its own dashboards. For example, the kiosks of a workshop are one group, and a kitchen tablet is a second group with another dashboard. A user can be in one group only.
+
+You do not list the resources of a group. Lite Resources finds them from the dashboards of the group at each page load. It finds the entities at each connection of a panel.
+
+### When a dashboard changes
+
+Design the dashboards as a normal user, with every resource loaded. When you save a dashboard of a group, these things occur with no reload of the integration:
+
+- Home Assistant sends the new dashboard to each open panel. This is its standard behaviour.
+- Lite Resources finds the entities of the group again. Each open panel of the group gets the states of the new entities at once, and loses the entities that left the dashboards.
+- A card type that is new on the dashboards loads on a panel at the next page load of that panel. The frontend loads its resources one time for each page load, so that card shows an error on the panel until then.
+
+A change of a group, such as a new user or a new dashboard, reaches the open panels the same way.
+
 ## Install
+
+Lite Resources needs Home Assistant 2026.11 or later.
 
 ### HACS (recommended)
 
@@ -68,13 +88,16 @@ Copy `custom_components/lite_resources` into your `config/custom_components/` fo
 
 [![Open your Home Assistant instance and start setting up Lite Resources.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=lite_resources)
 
-Or **Settings → Devices & services → Add integration → Lite Resources**.
+Or **Settings → Devices & services → Add integration → Lite Resources**. This step has no settings.
+
+Then open the integration and select **Add group**, one time for each set of panels. To change a group later, use its reconfigure button.
 
 | Option | What to choose |
 |---|---|
+| **Group name** | A name for the set of panels, such as *Workshop kiosks*. |
 | **Light users** | The user(s) your panels log in as. Give each panel its own Home Assistant user if it doesn't have one. |
 | **Their dashboards** | Every dashboard those users open. |
-| **Always include** | Resources to load regardless (e.g. a mod your theme relies on). |
+| **Always include** | Optional. Leave it empty, because the resources come from the dashboards. Add a resource only if a card fails to load (e.g. a mod your theme relies on). |
 | **Always exclude** | Resources to never load, even if a card seems to need them. Use this for an integration script with a generic name, such as `/dreame_vacuum/frontend.js`, that these dashboards don't use. It wins over *Always include*. |
 | **Include resources that can't be checked** | Resources served by integrations (e.g. `/browser_mod.js`, `/webrtc/...`) can't be read. On = load them (safe default). Off = skip them unless listed under *Always include*. A file whose name is a card these dashboards don't use, such as `dreame-vacuum-card.js`, is skipped either way. |
 | **Only send states their dashboards show** | Turn on for the biggest speed-up on slow devices. |
@@ -82,9 +105,13 @@ Or **Settings → Devices & services → Add integration → Lite Resources**.
 
 Then reload the panel's browser/app.
 
+### Update from 0.2.x
+
+The update moves the users and dashboards of a 0.2.x setup into one group named **Light users**. Open that group with its reconfigure button and give it a name. Then add the other groups. 0.2.x does not read the new configuration, so a return to 0.2.x needs the integration removed and added again.
+
 ### Check what a panel gets
 
-**Developer tools → Actions → `lite_resources.preview`** lists the resources light users get and skip, any `custom:` card types no local resource was found for, and (with state filtering on) the entities they receive.
+**Developer tools → Actions → `lite_resources.preview`** lists each group with its users. For each group it shows the resources that its users get and skip, and any `custom:` card types with no local resource. With state filtering on, it also shows the entities that they receive.
 
 ## FAQ
 
@@ -93,6 +120,9 @@ Home Assistant's frontend is designed so any screen can show anything instantly 
 
 **Does it filter per device or per user?**
 Per user. If you log in as a light user on your phone, you get the light behaviour there too - so give panels their own user.
+
+**Can two sets of panels have different dashboards?**
+Yes. Add one group for each set. Each group gets the resources and the states of its own dashboards.
 
 **Something shows "unavailable" or a card fails to load on the panel.**
 With state filtering on, entities not on the panel's dashboards aren't sent - add them under *Extra entities*, or add the dashboard. For a card that fails to load, run `lite_resources.preview` and add its resource under *Always include*. To stop a resource the panel never uses, add it under *Always exclude*.

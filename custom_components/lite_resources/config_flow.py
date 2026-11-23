@@ -1,4 +1,4 @@
-"""Config and options flow for Lite Resources."""
+"""Config flow for Lite Resources, and the subentry flow for its groups of light users."""
 
 from __future__ import annotations
 
@@ -7,7 +7,13 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.components.lovelace.const import LOVELACE_DATA
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    ConfigSubentryFlow,
+    SubentryFlowResult,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
     BooleanSelector,
@@ -17,6 +23,7 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
 )
 
 from .const import (
@@ -26,10 +33,13 @@ from .const import (
     CONF_EXTRA_ENTITIES,
     CONF_FILTER_STATES,
     CONF_INCLUDE_UNSCANNABLE,
+    CONF_NAME,
     CONF_USERS,
     DEFAULT_DASHBOARD,
     DOMAIN,
+    SUBENTRY_GROUP,
 )
+from .groups import groups_from_subentries, users_in_other_groups
 from .resolver import async_all_resources
 
 
@@ -41,7 +51,8 @@ def _multi(options: list[SelectOptionDict]) -> SelectSelector:
     )
 
 
-async def _async_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
+async def _async_group_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
+    """Return the form of one group, with `current` as the values that it shows."""
     users = [
         SelectOptionDict(value=u.id, label=u.name or u.id)
         for u in await hass.auth.async_get_users()
@@ -62,64 +73,105 @@ async def _async_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Sch
     ]
     return vol.Schema(
         {
+            vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): TextSelector(),
             vol.Required(CONF_USERS, default=current.get(CONF_USERS, [])): _multi(users),
             vol.Required(
                 CONF_DASHBOARDS, default=current.get(CONF_DASHBOARDS, [])
             ): _multi(dashboards),
+            vol.Required(
+                CONF_FILTER_STATES, default=current.get(CONF_FILTER_STATES, True)
+            ): BooleanSelector(),
+            vol.Optional(
+                CONF_EXTRA_ENTITIES, default=current.get(CONF_EXTRA_ENTITIES, [])
+            ): EntitySelector(EntitySelectorConfig(multiple=True)),
+            vol.Required(
+                CONF_INCLUDE_UNSCANNABLE,
+                default=current.get(CONF_INCLUDE_UNSCANNABLE, True),
+            ): BooleanSelector(),
             vol.Optional(
                 CONF_ALWAYS_INCLUDE, default=current.get(CONF_ALWAYS_INCLUDE, [])
             ): _multi(resources),
             vol.Optional(
                 CONF_ALWAYS_EXCLUDE, default=current.get(CONF_ALWAYS_EXCLUDE, [])
             ): _multi(resources),
-            vol.Required(
-                CONF_INCLUDE_UNSCANNABLE,
-                default=current.get(CONF_INCLUDE_UNSCANNABLE, True),
-            ): BooleanSelector(),
-            vol.Required(
-                CONF_FILTER_STATES, default=current.get(CONF_FILTER_STATES, False)
-            ): BooleanSelector(),
-            vol.Optional(
-                CONF_EXTRA_ENTITIES, default=current.get(CONF_EXTRA_ENTITIES, [])
-            ): EntitySelector(EntitySelectorConfig(multiple=True)),
         }
     )
 
 
 class LiteResourcesConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Set up Lite Resources (single instance)."""
+    """Set up Lite Resources (single instance). The groups are added afterwards."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Choose the light users and their dashboards."""
+        """Confirm the setup. The entry itself holds no settings."""
         if user_input is not None:
-            return self.async_create_entry(
-                title="Lite Resources", data={}, options=user_input
-            )
+            return self.async_create_entry(title="Lite Resources", data={})
+        return self.async_show_form(step_id="user")
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """Return the subentry types: one subentry for each group of light users."""
+        return {SUBENTRY_GROUP: GroupSubentryFlow}
+
+
+class GroupSubentryFlow(ConfigSubentryFlow):
+    """Add or change one group of light users."""
+
+    def _errors(self, user_input: dict[str, Any], group_id: str | None) -> dict[str, str]:
+        """Return the form errors of the input for the group with this ID (None: a new one)."""
+        if not str(user_input.get(CONF_NAME, "")).strip():
+            return {CONF_NAME: "no_name"}
+        if not user_input.get(CONF_USERS):
+            return {CONF_USERS: "no_users"}
+        if not user_input.get(CONF_DASHBOARDS):
+            return {CONF_DASHBOARDS: "no_dashboards"}
+        groups = groups_from_subentries(self._get_entry().subentries)
+        if users_in_other_groups(groups, group_id, user_input[CONF_USERS]):
+            return {CONF_USERS: "user_in_other_group"}
+        return {}
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Add a group."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._errors(user_input, None)
+            if not errors:
+                data = dict(user_input)
+                name = str(data.pop(CONF_NAME)).strip()
+                return self.async_create_entry(title=name, data=data)
         return self.async_show_form(
-            step_id="user", data_schema=await _async_schema(self.hass, {})
+            step_id="user",
+            data_schema=await _async_group_schema(self.hass, user_input or {}),
+            errors=errors,
         )
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Return the options flow."""
-        return LiteResourcesOptionsFlow()
-
-
-class LiteResourcesOptionsFlow(OptionsFlow):
-    """Change the light users, dashboards and extras."""
-
-    async def async_step_init(
+    async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Edit the options."""
+    ) -> SubentryFlowResult:
+        """Change a group."""
+        entry = self._get_entry()
+        subentry = self._get_reconfigure_subentry()
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            errors = self._errors(user_input, subentry.subentry_id)
+            if not errors:
+                data = dict(user_input)
+                name = str(data.pop(CONF_NAME)).strip()
+                # The update listener of the entry gives the open pages the new settings.
+                return self.async_update_and_abort(
+                    entry, subentry, title=name, data=data
+                )
+        current = user_input or {CONF_NAME: subentry.title, **subentry.data}
         return self.async_show_form(
-            step_id="init",
-            data_schema=await _async_schema(self.hass, dict(self.config_entry.options)),
+            step_id="reconfigure",
+            data_schema=await _async_group_schema(self.hass, current),
+            errors=errors,
         )

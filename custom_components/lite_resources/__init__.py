@@ -1,24 +1,29 @@
 """Lite Resources: make wall panels and other light devices do less work.
 
-For users chosen here (for example the login a wall panel uses):
+Light users are set up in groups (for example the logins of the wall panels of one room).
+For the users of a group:
 - Resources: Home Assistant's frontend fetches the full list of dashboard resources (custom
   cards and mods) with the "lovelace/resources" websocket command and loads all of them. This
-  integration answers that command with only the resources their dashboards use.
+  integration answers that command with only the resources the dashboards of the group use.
 - States (optional): the frontend streams every entity's state with "subscribe_entities". This
-  integration limits that stream to the entities their dashboards show.
+  integration limits that stream to the entities the dashboards of the group show.
+Both are worked out from the dashboards at each request. When a dashboard of a group changes,
+the open pages of the group get the new entity list at once.
 Everyone else gets Home Assistant's normal behaviour. Nothing is changed on disk.
 """
 
 from __future__ import annotations
 
 import logging
+from types import MappingProxyType
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import (
+    Event,
     HomeAssistant,
     ServiceCall,
     ServiceResponse,
@@ -29,20 +34,50 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.entityfilter import convert_include_exclude_filter
 
 from .const import (
-    CONF_FILTER_STATES,
-    CONF_USERS,
     DOMAIN,
+    EVENT_LOVELACE_UPDATED,
     SERVICE_PREVIEW,
+    SUBENTRY_GROUP,
     WS_RESOURCES,
     WS_SUBSCRIBE_ENTITIES,
+)
+from .groups import (
+    Group,
+    LiveSubscriptions,
+    group_for_user,
+    groups_from_subentries,
+    groups_with_dashboard,
+    legacy_group_data,
 )
 from .resolver import FileCache, async_dashboard_entities, async_resolve
 
 _LOGGER = logging.getLogger(__name__)
 
+# The title of the group that the migration makes from the options of a single-group version.
+MIGRATED_GROUP_TITLE = "Light users"
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Move the users and dashboards of a single-group version into one group."""
+    if entry.version == 1:
+        data = legacy_group_data(entry.options)
+        if data is not None and not groups_from_subentries(entry.subentries):
+            hass.config_entries.async_add_subentry(
+                entry,
+                ConfigSubentry(
+                    data=MappingProxyType(data),
+                    subentry_type=SUBENTRY_GROUP,
+                    title=MIGRATED_GROUP_TITLE,
+                    unique_id=None,
+                ),
+            )
+        hass.config_entries.async_update_entry(entry, options={}, version=2)
+        _LOGGER.info("Migrated the configuration to groups of light users")
+    return True
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Take over the resources (and optionally states) commands for the chosen users."""
+    """Take over the resources and states commands for the users of each group."""
     handlers = hass.data.get(websocket_api.DOMAIN, {})
     original = handlers.get(WS_RESOURCES)
     original_sub = handlers.get(WS_SUBSCRIBE_ENTITIES)
@@ -52,9 +87,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sub_handler, sub_schema = original_sub
     cache = FileCache()
 
-    def is_light_user(connection: websocket_api.ActiveConnection) -> bool:
+    def groups() -> list[Group]:
+        # Read at each request, so a change of a group needs no reload.
+        return groups_from_subentries(entry.subentries)
+
+    def group_of(connection: websocket_api.ActiveConnection) -> Group | None:
         user = connection.user
-        return user is not None and user.id in entry.options.get(CONF_USERS, [])
+        return group_for_user(groups(), user.id if user is not None else None)
+
+    async def entities_of(group: Group) -> set[str]:
+        """Return the entities of the dashboards of a group. Empty when that fails."""
+        try:
+            return await async_dashboard_entities(hass, dict(group.options))
+        except Exception:
+            _LOGGER.exception(
+                "Working out the entities of group %s failed; sending all states",
+                group.name,
+            )
+            return set()
 
     @websocket_api.websocket_command({vol.Required("type"): WS_RESOURCES})
     @websocket_api.async_response
@@ -63,31 +113,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connection: websocket_api.ActiveConnection,
         msg: dict[str, Any],
     ) -> None:
-        if not is_light_user(connection):
+        group = group_of(connection)
+        if group is None:
             original_handler(hass, connection, msg)
             return
         try:
-            result = await async_resolve(hass, dict(entry.options), cache)
+            result = await async_resolve(hass, dict(group.options), cache)
         except Exception:  # never leave a device without its cards
             _LOGGER.exception("Resolving resources failed; sending the full list")
             original_handler(hass, connection, msg)
             return
         if result.unresolved_types:
             _LOGGER.warning(
-                "No local resource provides %s for %s; add it under 'Always include' "
-                "if those cards fail to load",
+                "No local resource provides %s for %s (group %s); add it under "
+                "'Always include' if those cards fail to load",
                 ", ".join(result.unresolved_types),
                 connection.user.name,
+                group.name,
             )
         _LOGGER.debug(
-            "%s gets %d of %d resources",
+            "%s (group %s) gets %d of %d resources",
             connection.user.name,
+            group.name,
             len(result.included),
             len(result.included) + len(result.excluded),
         )
         connection.send_result(msg["id"], result.included)
 
     websocket_api.async_register_command(hass, ws_resources)
+
+    live = LiveSubscriptions(
+        lambda connection, msg: sub_handler(hass, connection, msg)
+    )
 
     @callback
     def ws_subscribe_entities(
@@ -96,9 +153,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         msg: dict[str, Any],
     ) -> None:
         # Only the frontend's unfiltered "all states" subscription is narrowed.
+        group = group_of(connection)
         if (
-            not entry.options.get(CONF_FILTER_STATES)
-            or not is_light_user(connection)
+            group is None
+            or not group.filter_states
             or msg.get("entity_ids")
             or not _empty_filter(msg)
         ):
@@ -106,21 +164,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
 
         async def narrowed() -> None:
-            try:
-                entities = await async_dashboard_entities(hass, dict(entry.options))
-            except Exception:
-                _LOGGER.exception("Working out dashboard entities failed; sending all states")
-                entities = set()
+            entities = await entities_of(group)
             if not entities:
                 sub_handler(hass, connection, msg)
                 return
             _LOGGER.debug(
-                "%s gets states for %d of %d entities",
+                "%s (group %s) gets states for %d of %d entities",
                 connection.user.name,
+                group.name,
                 len(entities),
                 len(hass.states.async_entity_ids()),
             )
-            sub_handler(hass, connection, {**msg, "entity_ids": sorted(entities)})
+            live.start(connection, msg, entities)
 
         hass.async_create_task(narrowed(), eager_start=True)
 
@@ -128,21 +183,71 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, WS_SUBSCRIBE_ENTITIES, ws_subscribe_entities, sub_schema
     )
 
+    async def refresh_live(only: set[str] | None = None) -> None:
+        """Give each open page of a light user the entity set of its group as it is now.
+
+        `only` limits the work to the pages of the groups with these IDs.
+        """
+        current = groups()
+        sets: dict[str, set[str]] = {}
+        for item in live.items():
+            user = item.connection.user
+            group = group_for_user(current, user.id if user is not None else None)
+            if group is None or not group.filter_states:
+                # The user left its group, or the group no longer narrows the states.
+                live.update(item, None)
+                continue
+            if only is not None and group.group_id not in only:
+                continue
+            if group.group_id not in sets:
+                sets[group.group_id] = await entities_of(group)
+            entities = sets[group.group_id]
+            if not entities:
+                continue
+            if live.update(item, entities):
+                _LOGGER.debug(
+                    "%s (group %s) now gets states for %d entities",
+                    user.name,
+                    group.name,
+                    len(entities),
+                )
+
+    @callback
+    def dashboard_updated(event: Event) -> None:
+        """A dashboard changed: update the open pages of the groups that show it."""
+        if "url_path" not in event.data:
+            # The event names no dashboard. None is the URL path of the default dashboard.
+            return
+        affected = groups_with_dashboard(groups(), event.data["url_path"])
+        if affected and len(live):
+            hass.async_create_task(refresh_live({group.group_id for group in affected}))
+
+    async def groups_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """A group was added, changed or removed: update the open pages."""
+        await refresh_live()
+
     async def preview(call: ServiceCall) -> ServiceResponse:
-        options = dict(entry.options)
-        result = await async_resolve(hass, options, cache)
-        names = []
-        for user_id in options.get(CONF_USERS, []):
-            user = await hass.auth.async_get_user(user_id)
-            names.append(user.name if user else user_id)
-        response: dict[str, Any] = {"users": names, **result.as_dict()}
-        if options.get(CONF_FILTER_STATES):
-            entities = await async_dashboard_entities(hass, options)
-            response["state_entities"] = sorted(entities)
-            response["state_entities_count"] = (
-                f"{len(entities)} of {len(hass.states.async_entity_ids())}"
-            )
-        return response
+        response: list[dict[str, Any]] = []
+        for group in groups():
+            options = dict(group.options)
+            result = await async_resolve(hass, options, cache)
+            names = []
+            for user_id in group.users:
+                user = await hass.auth.async_get_user(user_id)
+                names.append(user.name if user else user_id)
+            item: dict[str, Any] = {
+                "group": group.name,
+                "users": names,
+                **result.as_dict(),
+            }
+            if group.filter_states:
+                entities = await async_dashboard_entities(hass, options)
+                item["state_entities"] = sorted(entities)
+                item["state_entities_count"] = (
+                    f"{len(entities)} of {len(hass.states.async_entity_ids())}"
+                )
+            response.append(item)
+        return {"groups": response, "open_pages_with_narrowed_states": len(live)}
 
     hass.services.async_register(
         DOMAIN, SERVICE_PREVIEW, preview, supports_response=SupportsResponse.ONLY
@@ -155,7 +260,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_PREVIEW)
 
     entry.async_on_unload(restore)
-    entry.async_on_unload(entry.add_update_listener(_async_reload))
+    entry.async_on_unload(hass.bus.async_listen(EVENT_LOVELACE_UPDATED, dashboard_updated))
+    entry.async_on_unload(entry.add_update_listener(groups_updated))
     return True
 
 
@@ -165,11 +271,6 @@ def _empty_filter(msg: dict[str, Any]) -> bool:
         return convert_include_exclude_filter(msg).empty_filter
     except (KeyError, TypeError):
         return not any(msg.get(k) for k in ("include", "exclude"))
-
-
-async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Options changed: reload so the new settings apply to new connections."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

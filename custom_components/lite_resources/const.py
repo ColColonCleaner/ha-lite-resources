@@ -2,6 +2,14 @@
 
 DOMAIN = "lite_resources"
 
+# Each group of light users is a config subentry of this type. Its title is the group name.
+SUBENTRY_GROUP = "group"
+CONF_NAME = "name"
+
+# Fired on the event bus by the lovelace component when a dashboard configuration changes.
+# The event data holds "url_path", which is None for the default dashboard.
+EVENT_LOVELACE_UPDATED = "lovelace_updated"
+
 CONF_USERS = "users"
 CONF_DASHBOARDS = "dashboards"
 CONF_ALWAYS_INCLUDE = "always_include"
@@ -29,6 +37,15 @@ WS_RESOURCES = "lovelace/resources"
 KEY_HINTS: dict[str, str] = {
     "card_mod": "card-mod",
     "kiosk_mode": "kiosk-mode",
+}
+
+# Dashboard values that only work when another resource is loaded. The card that reads
+# the value makes an element of that resource itself, so no "custom:" type names it.
+# value in dashboard JSON -> substring of the resource URL that provides it.
+VALUE_HINTS: dict[str, str] = {
+    # Advanced Camera Card: the live provider "webrtc-card" shows the stream in the
+    # <webrtc-camera> element of the WebRTC Camera integration, and waits for it.
+    "webrtc-card": "webrtc-camera",
 }
 
 SERVICE_PREVIEW = "preview"

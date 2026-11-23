@@ -24,6 +24,7 @@ from .const import (
     CONF_INCLUDE_UNSCANNABLE,
     DEFAULT_DASHBOARD,
     KEY_HINTS,
+    VALUE_HINTS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -318,6 +319,7 @@ async def async_resolve(
             continue
         needed.update(_CUSTOM_TYPE.findall(text))
         hints.update(sub for k, sub in KEY_HINTS.items() if f'"{k}"' in text)
+        hints.update(sub for v, sub in VALUE_HINTS.items() if f'"{v}"' in text)
     result.needed_types = sorted(needed)
 
     provided: set[str] = set()

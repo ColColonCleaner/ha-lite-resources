@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-23
+
+- **Groups of light users.** Each group has its own users, dashboards and options. So the panels of one room and a tablet of another room each get the resources and the states of their own dashboards. Add a group with **Add group** on the integration page, and change one with its reconfigure button. A user can be in one group only.
+- The update moves the users and dashboards of a single-group setup into one group named **Light users**. You enter nothing again. 0.2.x does not read the new configuration. So a return to 0.2.x after the update needs the integration removed and added again.
+- **A changed dashboard reaches the open panels at once.** When you save a dashboard of a group, each open page of the group gets the states of the entities that are new on the dashboard. It loses the entities that left the dashboard. No reload of the integration is necessary. A change of a group does the same.
+- A card type that is new on a dashboard loads on a panel at the next page load of that panel. The frontend loads its resources one time for each page load.
+- **Always include** and **Always exclude** are optional overrides, and the form says so. The resources of a group come from its dashboards.
+- A camera of the Advanced Camera Card with `live_provider: webrtc-card` keeps the script of the WebRTC Camera integration, `webrtc-camera.js`. No card type in the dashboard names that script.
+- `lite_resources.preview` lists each group with its users, and the number of open pages with narrowed states.
+- Needs Home Assistant 2026.11 or later. The checks of the groups ran on 2026.11.2.
+
 ## 0.2.1 - 2026-11-16
 
 - Card names built in JavaScript are recognised. Mushroom's `mushroom.js` is loaded for `custom:mushroom-*-card` on the selected dashboards, including cards nested in stacks, sections, conditional cards and pop-ups.

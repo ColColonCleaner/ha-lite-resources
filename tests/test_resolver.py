@@ -552,6 +552,39 @@ class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/hacsfiles/lovelace-mushroom/mushroom.js", summary["included"])
         self.assertNotIn("/hacsfiles/button-card/button-card.js?v=9", summary["included"])
 
+    async def test_camera_live_provider_keeps_the_webrtc_script(self) -> None:
+        """live_provider webrtc-card needs the element of the WebRTC integration.
+
+        Advanced Camera Card makes a <webrtc-camera> element for that live provider and
+        waits until the element is defined. No "custom:" type in the dashboard names it.
+        """
+        self.resources.append({"url": "/webrtc/webrtc-camera.js?v=v3.6.1", "type": "module"})
+        self.dashboards["cameras"] = _Dashboard(
+            {
+                "views": [
+                    {
+                        "cards": [
+                            {
+                                "type": "custom:advanced-camera-card",
+                                "cameras": [
+                                    {
+                                        "camera_entity": "camera.front",
+                                        "live_provider": "webrtc-card",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            }
+        )
+        used = await self._resolve(**{CONF_DASHBOARDS: ["cameras"]})
+        self.assertIn("/webrtc/webrtc-camera.js?v=v3.6.1", used["included"])
+
+        # A dashboard with no such camera does not load the script.
+        unused = await self._resolve(**{CONF_DASHBOARDS: ["panel"]})
+        self.assertIn("/webrtc/webrtc-camera.js?v=v3.6.1", unused["excluded"])
+
 
 if __name__ == "__main__":
     unittest.main()
