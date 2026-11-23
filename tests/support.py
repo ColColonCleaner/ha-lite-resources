@@ -90,11 +90,56 @@ def _async_register_command(hass, command_or_handler, handler=None, schema=None)
     hass.data.setdefault("websocket_api", {})[command] = (handler, schema)
 
 
+FILTER_KEYS = ("domains", "entity_globs", "entities")
+
+
+def empty_filter_part() -> dict[str, list[str]]:
+    """Return what the schema of subscribe_entities adds for "include" and for "exclude"."""
+    return {key: [] for key in FILTER_KEYS}
+
+
 def _convert_include_exclude_filter(msg: dict[str, Any]) -> SimpleNamespace:
-    """Stand-in for entityfilter.convert_include_exclude_filter."""
+    """Stand-in for entityfilter.convert_include_exclude_filter.
+
+    As in Home Assistant, it reads "include" and "exclude" with no default, so a message
+    that did not pass the schema raises KeyError.
+    """
+    include, exclude = msg["include"], msg["exclude"]
     return SimpleNamespace(
-        empty_filter=not (msg.get("include") or msg.get("exclude"))
+        empty_filter=not any(include[key] or exclude[key] for key in FILTER_KEYS)
     )
+
+
+def _async_register_admin_service(
+    hass, domain, service, func, schema=None, supports_response=None, **kwargs
+) -> None:
+    """Stand-in for helpers.service.async_register_admin_service."""
+    hass.services.async_register(domain, service, func, supports_response=supports_response)
+    hass.services.admin_only.add((domain, service))
+
+
+def _async_at_started(hass, at_start_cb):
+    """Stand-in for helpers.start.async_at_started.
+
+    The callback runs at once when the start is complete (`hass.started`), and otherwise
+    at the event homeassistant_started. The result removes a listener that still waits.
+    """
+    if hass.started:
+        hass.async_create_task(at_start_cb(hass))
+        return lambda: None
+    waiting: list[Any] = []
+
+    def run(event) -> None:
+        waiting.clear()
+        hass.async_create_task(at_start_cb(hass))
+
+    waiting.append(hass.bus.async_listen_once("homeassistant_started", run))
+
+    def cancel() -> None:
+        while waiting:
+            waiting.pop()()
+
+    return cancel
 
 
 def _effective_area_id(hass, device) -> str | None:
@@ -138,9 +183,12 @@ def install_homeassistant_stubs() -> None:
         exceptions.ConfigEntryNotReady = ConfigEntryNotReady
 
     _default(
-        _module("homeassistant.const"),
-        "EVENT_HOMEASSISTANT_STARTED",
-        "homeassistant_started",
+        _module("homeassistant.helpers.service"),
+        "async_register_admin_service",
+        _async_register_admin_service,
+    )
+    _default(
+        _module("homeassistant.helpers.start"), "async_at_started", _async_at_started
     )
 
     core = _module("homeassistant.core")

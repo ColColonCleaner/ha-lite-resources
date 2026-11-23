@@ -10,6 +10,17 @@ CONF_NAME = "name"
 # The event data holds "url_path", which is None for the default dashboard.
 EVENT_LOVELACE_UPDATED = "lovelace_updated"
 
+# Fired on the event bus when the entity, device or area registry changes. A card that
+# finds its entities in the registries can then show other entities.
+REGISTRY_EVENTS = (
+    "entity_registry_updated",
+    "device_registry_updated",
+    "area_registry_updated",
+)
+# The registries change in bursts. The open pages get one update this number of seconds
+# after the first change of a burst.
+REGISTRY_REFRESH_DELAY = 10
+
 CONF_USERS = "users"
 CONF_DASHBOARDS = "dashboards"
 CONF_ALWAYS_INCLUDE = "always_include"
@@ -28,6 +39,11 @@ BASE_ENTITIES = ("sun.sun", "zone.home")
 # whose url_path is None.
 DEFAULT_DASHBOARD = "__default__"
 
+# The URL path of the dashboard that Home Assistant 2026.11 shows as the default dashboard
+# when it exists. The lovelace commands of Home Assistant take it for a request with no
+# URL path, before the dashboard with the key None.
+LOVELACE_DASHBOARD = "lovelace"
+
 # The websocket command the frontend uses to fetch the resource list.
 WS_RESOURCES = "lovelace/resources"
 
@@ -37,6 +53,9 @@ WS_RESOURCES = "lovelace/resources"
 KEY_HINTS: dict[str, str] = {
     "card_mod": "card-mod",
     "kiosk_mode": "kiosk-mode",
+    # Advanced Camera Card: a camera with the key "webrtc_card" and no live provider takes
+    # the live provider "webrtc-card" by itself, and waits for the <webrtc-camera> element.
+    "webrtc_card": "webrtc-camera",
 }
 
 # Dashboard values that only work when another resource is loaded. The card that reads

@@ -72,16 +72,13 @@
         "no_users": "Select at least one user.",
         "no_dashboards": "Select at least one dashboard.",
         "user_in_other_group": "A selected user is already in another group. A user can be in one group only."
-      },
-      "abort": {
-        "reconfigure_successful": "The group was changed."
       }
     }
   },
   "services": {
     "preview": {
       "name": "Preview",
-      "description": "Show, for each group, which resources its users get and which are skipped, any card types no local resource was found for, and (if state filtering is on) which entities they receive."
+      "description": "For administrators. Show, for each group, which resources its users get and which are skipped, any card types no local resource was found for, and (if state filtering is on) which entities they receive. It also says why the states or the resources of a group are not narrowed."
     }
   }
 }

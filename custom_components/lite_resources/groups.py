@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import functools
 import logging
+import sys
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
@@ -22,6 +23,7 @@ from .const import (
     CONF_INCLUDE_UNSCANNABLE,
     CONF_USERS,
     DEFAULT_DASHBOARD,
+    LOVELACE_DASHBOARD,
     SUBENTRY_GROUP,
     WS_SUBSCRIBE_ENTITIES,
 )
@@ -58,7 +60,9 @@ class Group:
 
     group_id: str
     name: str
-    options: Mapping[str, Any]
+    # The options are a dict, which has no hash. The hash of a group is that of its ID
+    # and its name.
+    options: Mapping[str, Any] = field(hash=False)
 
     @property
     def users(self) -> list[str]:
@@ -101,9 +105,26 @@ def dashboard_key(url_path: str | None) -> str:
 
 
 def groups_with_dashboard(groups: Iterable[Group], url_path: str | None) -> list[Group]:
-    """Return the groups whose dashboards include the dashboard with this URL path."""
-    key = dashboard_key(url_path)
-    return [group for group in groups if key in group.dashboards]
+    """Return the groups whose dashboards include the dashboard with this URL path.
+
+    Home Assistant shows the dashboard with the URL path LOVELACE_DASHBOARD as the default
+    dashboard when it exists. So a group with the default dashboard also follows that one.
+    """
+    keys = {dashboard_key(url_path)}
+    if url_path == LOVELACE_DASHBOARD:
+        keys.add(DEFAULT_DASHBOARD)
+    return [group for group in groups if keys.intersection(group.dashboards)]
+
+
+def users_in_two_groups(groups: Iterable[Group]) -> set[str]:
+    """Return each user that more than one group holds. The first group counts for it."""
+    seen: set[str] = set()
+    twice: set[str] = set()
+    for group in groups:
+        users = set(group.users)
+        twice |= seen & users
+        seen |= users
+    return twice
 
 
 def users_in_other_groups(
@@ -169,6 +190,21 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
     return found
 
 
+def adoption_fault(bus: Any) -> str | None:
+    """Return why the search for early subscriptions cannot work here, or None when it can.
+
+    The search reads two internals of Home Assistant: the listener table of the event bus,
+    and the function CORE_FORWARD_FUNCTION of the module CORE_FORWARD_MODULE. On a version
+    that lacks one of them, the search finds nothing and reports nothing by itself.
+    """
+    if not isinstance(getattr(bus, "_listeners", None), Mapping):
+        return "the event bus has no listener table"
+    module = sys.modules.get(CORE_FORWARD_MODULE)
+    if module is None or not callable(getattr(module, CORE_FORWARD_FUNCTION, None)):
+        return f"{CORE_FORWARD_MODULE} has no function {CORE_FORWARD_FUNCTION}"
+    return None
+
+
 class _QuietConnection:
     """A connection whose `send_result` does nothing, and that forwards everything else.
 
@@ -203,10 +239,19 @@ class LiveSubscriptions:
     handler stores the function that ends its state listener in
     `connection.subscriptions[msg["id"]]`, and sends the states of the entities in
     `msg["entity_ids"]`, or of all entities without that key.
+
+    `validate(msg)` is the schema of that command. The handler reads keys that only the
+    schema adds, so each message that this object makes passes through it first. A message
+    from a page passed through it before the handler of the integration got it.
     """
 
-    def __init__(self, subscribe: Callable[[Any, dict[str, Any]], None]) -> None:
+    def __init__(
+        self,
+        subscribe: Callable[[Any, dict[str, Any]], None],
+        validate: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    ) -> None:
         self._subscribe = subscribe
+        self._validate = validate
         self._live: dict[tuple[int, Any], _Live] = {}
 
     def __len__(self) -> int:
@@ -226,7 +271,8 @@ class LiveSubscriptions:
         """Give a live subscription a new entity set. None gives the page all entities.
 
         The page keeps its subscription ID. It receives the states of the new set, and a
-        removal for each entity that left the set. Returns False when the set is unchanged.
+        removal for each entity that left the set. Returns False when the set is unchanged,
+        and when the handler fails. After a failure the page keeps its earlier set.
         """
         wanted = None if entities is None else frozenset(entities)
         if wanted == live.entities:
@@ -235,18 +281,15 @@ class LiveSubscriptions:
         key = (id(live.connection), msg_id)
         if self._live.get(key) is not live:
             return False
-        ended = live.connection.subscriptions.pop(msg_id, None)
-        if ended is None:
+        if msg_id not in live.connection.subscriptions:
             # The page ended the subscription between the two steps.
             self._live.pop(key, None)
             return False
-        self._live.pop(key, None)
-        getattr(ended, "inner", ended)()
-        if wanted is None:
-            self._subscribe(_QuietConnection(live.connection), dict(live.msg))
-            return True
-        if not self._narrow(live.connection, live.msg, wanted):
+        if not self._replace(live.connection, live.msg, wanted):
             return False
+        self._live.pop(key, None)
+        if wanted is None:
+            return True
         removed = live.entities - wanted
         if removed:
             live.connection.send_message(
@@ -272,18 +315,26 @@ class LiveSubscriptions:
         before this integration is set up. `held` is each entity that the page can hold
         now. The page keeps its subscription ID. It receives the states of `entities`, and
         a removal for each other entity of `held`. Returns False when the page has no
-        subscription with this ID, and when the narrowed subscription fails.
+        subscription with this ID, and when the handler fails. After a failure the page
+        keeps its subscription for all entities.
         """
         key = (id(connection), msg_id)
-        ended = connection.subscriptions.pop(msg_id, None)
-        if ended is None or key in self._live:
-            if ended is not None:
-                connection.subscriptions[msg_id] = ended
+        if key in self._live or msg_id not in connection.subscriptions:
             return False
-        ended()
         wanted = frozenset(entities)
-        msg = {"id": msg_id, "type": WS_SUBSCRIBE_ENTITIES}
-        if not self._narrow(connection, msg, wanted):
+        msg: dict[str, Any] = {"id": msg_id, "type": WS_SUBSCRIBE_ENTITIES}
+        if self._validate is not None:
+            try:
+                # The schema adds the keys "include" and "exclude", which the handler reads.
+                msg = dict(self._validate(msg))
+            except Exception:  # the page keeps its subscription for all entities
+                _LOGGER.exception(
+                    "The schema of %s refused the message of an adoption; the page "
+                    "keeps all states",
+                    WS_SUBSCRIBE_ENTITIES,
+                )
+                return False
+        if not self._replace(connection, msg, wanted):
             return False
         removed = frozenset(held) - wanted
         if removed:
@@ -297,31 +348,44 @@ class LiveSubscriptions:
         self._track(_Live(connection, msg, wanted))
         return True
 
-    def _narrow(self, connection: Any, msg: dict[str, Any], wanted: frozenset[str]) -> bool:
-        """Start the narrowed subscription of a page whose earlier subscription ended.
+    def _replace(
+        self, connection: Any, msg: dict[str, Any], wanted: frozenset[str] | None
+    ) -> bool:
+        """Put a new state listener in the place of the listener of a subscription.
 
-        Returns False when the handler fails. The page then gets a subscription to all
-        entities, so that it does not stay with no state stream.
+        `wanted` is the entity set of the new listener, and None gives all entities. The
+        new listener starts before the old one ends, and no state change can occur between
+        the two steps, because nothing here waits. So the page loses no state change, and a
+        failure of the handler leaves the old listener in its place. Returns False then.
         """
-        quiet = _QuietConnection(connection)
-        try:
-            self._subscribe(quiet, {**msg, "entity_ids": sorted(wanted)})
-        except Exception:  # a page with no state stream shows old values
-            _LOGGER.exception(
-                "The narrowed state subscription failed; the page gets all states"
-            )
-            # The handler can fail after it put its listener on the event bus.
-            half_made = connection.subscriptions.pop(msg["id"], None)
-            if half_made is not None:
-                half_made()
-            try:
-                self._subscribe(quiet, dict(msg))
-            except Exception:  # the other pages still get their update
-                _LOGGER.exception(
-                    "The state subscription for all entities failed too; the page "
-                    "gets no state until it connects again"
-                )
+        msg_id = msg["id"]
+        old = connection.subscriptions.get(msg_id)
+        if old is None:
             return False
+        new_msg = dict(msg)
+        new_msg.pop("entity_ids", None)
+        if wanted is not None:
+            new_msg["entity_ids"] = sorted(wanted)
+        try:
+            self._subscribe(_QuietConnection(connection), new_msg)
+        except Exception:  # the page keeps the listener that it had
+            _LOGGER.exception(
+                "The change of an open state subscription failed; the page keeps "
+                "the entities that it had"
+            )
+            # The handler can fail after it put its own listener in the place of the old one.
+            half_made = connection.subscriptions.get(msg_id)
+            if half_made is not None and half_made is not old:
+                try:
+                    half_made()
+                except Exception:  # the old listener still goes back in its place
+                    _LOGGER.exception("The end of a half-made state listener failed")
+            connection.subscriptions[msg_id] = old
+            return False
+        # The handler put the function that ends the new listener in the place of `old`.
+        # A listener that _track wrapped ends through its inner function, so that the
+        # tracking of the page changes only in the caller.
+        getattr(old, "inner", old)()
         return True
 
     def _track(self, live: _Live) -> None:

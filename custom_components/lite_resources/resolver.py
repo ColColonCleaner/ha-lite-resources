@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import gzip
-import json
 import logging
 import os
 import re
@@ -22,8 +22,10 @@ from .const import (
     CONF_DASHBOARDS,
     CONF_EXTRA_ENTITIES,
     CONF_INCLUDE_UNSCANNABLE,
+    CONF_USERS,
     DEFAULT_DASHBOARD,
     KEY_HINTS,
+    LOVELACE_DASHBOARD,
     MEMBER_ATTRIBUTES,
     VALUE_HINTS,
 )
@@ -33,14 +35,19 @@ from .discovery import (
     area_sensor_entities,
     card_platforms,
     discovered_entities,
+    has_location_condition,
     registry_entities,
+    unscoped_reason,
+    wide_domains,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# "custom:xxx" anywhere in a dashboard (cards, rows, badges, features, and
+# A dashboard string that is "custom:xxx" as a whole (cards, rows, badges, features, and
 # cards nested inside pop-ups, stacks, sections or other cards' options).
-_CUSTOM_TYPE = re.compile(r'"custom:([A-Za-z0-9_.\-]+)"')
+_CUSTOM_TYPE = re.compile(r"custom:([A-Za-z0-9_.\-]+)")
+# "custom:xxx" inside a longer string, such as a template that returns a card.
+_CUSTOM_TYPE_INSIDE = re.compile(r"custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)")
 # A dashed name this file actually registers, not every hyphenated token it
 # mentions. Mentions of another card ("button-card" inside an unrelated file)
 # must not pull that file in.
@@ -57,8 +64,13 @@ _ASSIGN = re.compile(
 _TEMPLATE = re.compile(
     rb"""\$\{([A-Za-z_$][A-Za-z0-9_$]{0,40})\}(-[a-z0-9]+(?:-[a-z0-9]+)*)"""
 )
-_CONCAT = re.compile(
-    rb"""(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3"""
+# A name that a file builds from two quoted pieces counts where the file gives it to
+# customElements.define or assigns it to a variable. Two pieces with a plus between them
+# in another place, such as an argument or a property like className, are no element of
+# the file.
+_CONCAT_USED = re.compile(
+    rb"""(?:customElements\.define\(|(?<![A-Za-z0-9_$.])[A-Za-z_$][A-Za-z0-9_$]{0,40}\s*=)"""
+    rb"""\s*(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3"""
 )
 _CUSTOM_CARD_TYPE = re.compile(
     rb"""type\s*:\s*["']([a-z][a-z0-9_]*(?:-[a-z0-9_]+)+)["']"""
@@ -91,6 +103,22 @@ _GENERIC_STEMS = frozenset(
         "scripts",
     }
 )
+# The keys of the warnings that the log already holds.
+_WARNED: set[Any] = set()
+
+
+def _warn_once(key: Any, message: str, *args: Any) -> None:
+    """Log a warning one time. A warning at each request of each page hides a new one."""
+    if key not in _WARNED:
+        _WARNED.add(key)
+        _LOGGER.warning(message, *args)
+
+
+class CannotNarrow(Exception):
+    """The dashboards of a group do not say what a page of the group needs.
+
+    The caller then sends all states, or the full resource list. The text is the reason.
+    """
 
 
 @dataclass
@@ -102,6 +130,12 @@ class Resolution:
     needed_types: list[str] = field(default_factory=list)
     unresolved_types: list[str] = field(default_factory=list)
     unverified_types: list[str] = field(default_factory=list)
+    # Needed types that no file registers in a way that the scan sees. Each file that
+    # names such a type in quotes is included for it.
+    guessed_types: list[str] = field(default_factory=list)
+    # Readable files with no element that the scan sees and with no file name of a card,
+    # which are not included. Such a file can work by a side effect, such as an icon set.
+    excluded_without_element: list[str] = field(default_factory=list)
     dashboards: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -111,8 +145,10 @@ class Resolution:
             "needed_types": self.needed_types,
             "unresolved_types": self.unresolved_types,
             "unverified_types": self.unverified_types,
+            "guessed_types": self.guessed_types,
             "included": [r["url"] for r in self.included],
             "excluded": [r["url"] for r in self.excluded],
+            "excluded_without_element": self.excluded_without_element,
         }
 
 
@@ -121,29 +157,42 @@ class FileCache:
 
     def __init__(self) -> None:
         """Initialise an empty cache."""
-        self._cache: dict[str, tuple[tuple[int, int], frozenset[str]]] = {}
+        self._cache: dict[
+            str, tuple[tuple[int, int], frozenset[str], frozenset[str]]
+        ] = {}
 
-    def names(self, path: str) -> frozenset[str] | None:
-        """Return the dashed names in a file (runs in the executor)."""
+    def _read(self, path: str) -> tuple[frozenset[str], frozenset[str]] | None:
+        """Return the registered names and the quoted names of a file, or None."""
         for candidate, opener in ((path, open), (path + ".gz", gzip.open)):
             try:
                 stat = os.stat(candidate)
-            except OSError:
+            except (OSError, ValueError):  # ValueError: a null character in the path
                 continue
             key = (stat.st_mtime_ns, stat.st_size)
             cached = self._cache.get(candidate)
             if cached and cached[0] == key:
-                return cached[1]
+                return cached[1], cached[2]
             try:
                 with opener(candidate, "rb") as fh:
                     data = fh.read()
-            except OSError as err:
+            except Exception as err:  # a cut or corrupt .gz file raises no OSError
                 _LOGGER.debug("Cannot read %s: %s", candidate, err)
                 return None
             found = names_in_javascript(data, _stem_from_filename(candidate))
-            self._cache[candidate] = (key, found)
-            return found
+            mentioned = frozenset(name.decode() for name in _QUOTED.findall(data))
+            self._cache[candidate] = (key, found, mentioned)
+            return found, mentioned
         return None
+
+    def names(self, path: str) -> frozenset[str] | None:
+        """Return the dashed names a file registers (runs in the executor)."""
+        read = self._read(path)
+        return None if read is None else read[0]
+
+    def mentions(self, path: str) -> frozenset[str] | None:
+        """Return each dashed name that a file holds in quotes (runs in the executor)."""
+        read = self._read(path)
+        return None if read is None else read[1]
 
 
 def names_in_javascript(data: bytes, stem: str = "") -> frozenset[str]:
@@ -157,9 +206,10 @@ def names_in_javascript(data: bytes, stem: str = "") -> frozenset[str]:
     still counts (``button-card.js`` containing ``"button-card"``).
     """
     found: set[str] = set()
-    bindings: dict[str, str] = {}
+    # A minified file binds one short name more than one time, so each value counts.
+    bindings: dict[str, set[str]] = {}
     for ident, _quote, value in _ASSIGN.findall(data):
-        bindings[ident.decode()] = value.decode()
+        bindings.setdefault(ident.decode(), set()).add(value.decode())
 
     def consider(name: str) -> None:
         if _CARDISH.match(name):
@@ -168,12 +218,12 @@ def names_in_javascript(data: bytes, stem: str = "") -> frozenset[str]:
     for literal in _DEFINE_LITERAL.findall(data):
         consider(literal.decode())
     for ident in _DEFINE_IDENT.findall(data):
-        consider(bindings.get(ident.decode(), ""))
-    for _q1, left, _q2, right in _CONCAT.findall(data):
+        for value in bindings.get(ident.decode(), ()):
+            consider(value)
+    for _q1, left, _q2, right in _CONCAT_USED.findall(data):
         consider(left.decode() + right.decode())
     for ident, tail in _TEMPLATE.findall(data):
-        base = bindings.get(ident.decode())
-        if base is not None:
+        for base in bindings.get(ident.decode(), ()):
             consider(base + tail.decode())
     for card_type in _CUSTOM_CARD_TYPE.findall(data):
         consider(card_type.decode())
@@ -207,6 +257,15 @@ def resource_stem(url: str) -> str:
     return name
 
 
+def resource_key(url: str) -> tuple[str, str]:
+    """Return the host and the path of a resource URL.
+
+    The query string is left out: it carries a version that changes on updates.
+    """
+    parts = urlsplit(url)
+    return parts.netloc.lower(), parts.path
+
+
 def types_for_stem(stem: str, needed: set[str]) -> set[str]:
     """Card types a file name itself accounts for.
 
@@ -237,14 +296,22 @@ def stem_names_unused_card(stem: str, needed: set[str]) -> bool:
 
 
 def url_to_path(hass: HomeAssistant, url: str) -> str | None:
-    """Map a resource URL to a local file, or None if it isn't a local file."""
-    path = urlsplit(url).path
+    """Map a resource URL to a local file, or None if it isn't a local file.
+
+    A URL with a host is a file of another server, whatever its path is.
+    """
+    parts = urlsplit(url)
+    if parts.netloc:
+        return None
+    path = parts.path
     if path.startswith("/local/"):
         base, rel = hass.config.path("www"), path[len("/local/") :]
     elif path.startswith("/hacsfiles/"):
         base, rel = hass.config.path("www", "community"), path[len("/hacsfiles/") :]
     else:
         return None
+    # The same form for both paths, so that the test of the folder compares like with like.
+    base = os.path.normpath(base)
     full = os.path.normpath(os.path.join(base, unquote(rel)))
     if not full.startswith(base + os.sep):
         return None
@@ -260,23 +327,87 @@ async def async_all_resources(hass: HomeAssistant) -> list[dict[str, Any]]:
     return list(resources.async_items() or [])
 
 
-async def _async_dashboard_config(hass: HomeAssistant, key: str) -> Any | None:
-    """Return a dashboard's config, or None if unavailable."""
-    url_path = None if key == DEFAULT_DASHBOARD else key
-    dashboard = hass.data[LOVELACE_DATA].dashboards.get(url_path)
-    if dashboard is None:
-        _LOGGER.warning("Dashboard %s not found", key)
-        return None
-    try:
-        return await dashboard.async_load(False)
-    except HomeAssistantError:  # includes ConfigNotFound (empty/auto dashboard)
-        return None
+@dataclass
+class DashboardScan:
+    """The strings, the keys and the mappings of one dashboard configuration."""
+
+    key: str
+    config: Any
+    strings: set[str] = field(default_factory=set)
+    keys: set[str] = field(default_factory=set)
+    nodes: list[Any] = field(default_factory=list)
+
+    @property
+    def text(self) -> str:
+        """Each string and each key, one on a line, for a search of the whole dashboard."""
+        return "\n".join(self.strings | self.keys)
+
+    def custom_types(self) -> set[str]:
+        """Return each custom type that the dashboard names."""
+        found: set[str] = set()
+        for text in self.strings:
+            whole = _CUSTOM_TYPE.fullmatch(text)
+            if whole:
+                found.add(whole.group(1))
+            elif "custom:" in text:
+                found.update(_CUSTOM_TYPE_INSIDE.findall(text))
+        return found
 
 
-async def _async_dashboard_text(hass: HomeAssistant, key: str) -> str | None:
-    """Return a dashboard's config as JSON text, or None if unavailable."""
-    config = await _async_dashboard_config(hass, key)
-    return None if config is None else json.dumps(config)
+def scan_dashboard(key: str, config: Any) -> DashboardScan:
+    """Walk a dashboard configuration, and return its strings, keys and mappings.
+
+    The walk reads the values themselves and not their JSON text. In JSON text, a line
+    break inside a string is a backslash and a letter, which hides the entity ID after it,
+    and a value that JSON does not know, such as a date of a YAML dashboard, has no text.
+    """
+    scan = DashboardScan(key, config)
+    todo = [config]
+    while todo:
+        node = todo.pop()
+        if isinstance(node, str):
+            scan.strings.add(node)
+        elif isinstance(node, Mapping):
+            scan.nodes.append(node)
+            for name, value in node.items():
+                if isinstance(name, str):
+                    scan.keys.add(name)
+                todo.append(value)
+        elif isinstance(node, (list, tuple)):
+            todo.extend(node)
+    return scan
+
+
+async def _async_dashboard_scans(
+    hass: HomeAssistant, keys: list[str]
+) -> tuple[list[DashboardScan], list[str]]:
+    """Return a scan of each dashboard with a stored configuration.
+
+    The second value names each dashboard that exists and gives no configuration: the
+    browser makes its cards, or its load failed. A dashboard that does not exist is left
+    out of both. CannotNarrow is raised when no dashboard of the list exists.
+    """
+    dashboards = hass.data[LOVELACE_DATA].dashboards
+    scans: list[DashboardScan] = []
+    without_config: list[str] = []
+    for key in keys:
+        if key == DEFAULT_DASHBOARD:
+            # As the lovelace commands of Home Assistant do for a request with no URL path.
+            dashboard = dashboards.get(LOVELACE_DASHBOARD) or dashboards.get(None)
+        else:
+            dashboard = dashboards.get(key)
+        if dashboard is None:
+            _warn_once(("no dashboard", key), "Dashboard %s not found", key)
+            continue
+        try:
+            config = await dashboard.async_load(False)
+        except HomeAssistantError:  # includes ConfigNotFound (empty/auto dashboard)
+            without_config.append(key)
+            continue
+        scans.append(scan_dashboard(key, config))
+    if not scans and not without_config:
+        raise CannotNarrow("no dashboard of the group exists")
+    return scans, without_config
 
 
 async def async_dashboard_entities(
@@ -284,20 +415,36 @@ async def async_dashboard_entities(
 ) -> set[str]:
     """Return every entity the configured dashboards can show.
 
-    Any existing entity id that appears anywhere in the dashboards' JSON (cards, pop-ups,
-    conditions, actions), the entities that a card finds by itself (the area card, and a
-    card of CARD_PLATFORMS), the members of any groups among them, the configured extras,
+    Any existing entity id that appears anywhere in the dashboards (cards, pop-ups,
+    conditions, actions), the entities that a card finds by itself (the area card, a card
+    of CARD_PLATFORMS, and a card that shows each entity of a domain), the members of any
+    groups among them, the person entity of each user of the group, the configured extras,
     and a few the frontend uses itself.
+
+    CannotNarrow is raised when the dashboards do not say which entities a page needs: a
+    dashboard with no stored configuration, a strategy, or a card that no rule follows.
 
     `include_missing` keeps each name that has no state now. A state subscription needs
     those names: the stream sends only the entities of its list, and an entity can get
     its first state after a page connects, for example while Home Assistant starts.
     """
+    scans, without_config = await _async_dashboard_scans(
+        hass, list(options.get(CONF_DASHBOARDS, []))
+    )
+    if without_config:
+        raise CannotNarrow(
+            f"the dashboard {without_config[0]} has no stored configuration, so the "
+            "browser makes its cards"
+        )
+    for scan in scans:
+        reason = unscoped_reason(scan.nodes)
+        if reason:
+            raise CannotNarrow(f"the dashboard {scan.key} holds {reason}")
+
     entities = registry_entities(hass)
+    states = hass.states.async_all()
     # The registry holds the domain of an entity before the entity has a state.
-    domains = {state.domain for state in hass.states.async_all()} | {
-        entity.domain for entity in entities
-    }
+    domains = {state.domain for state in states} | {entity.domain for entity in entities}
     if not domains:
         return set()
     pattern = re.compile(
@@ -308,18 +455,33 @@ async def async_dashboard_entities(
     found: set[str] = set(BASE_ENTITIES) | set(options.get(CONF_EXTRA_ENTITIES, []))
     cards: list[AreaCard] = []
     platforms: set[str] = set()
-    for key in options.get(CONF_DASHBOARDS, []):
-        config = await _async_dashboard_config(hass, key)
-        if config is None:
-            continue
-        text = json.dumps(config)
-        found.update(pattern.findall(text))
-        cards.extend(area_cards(config))
-        platforms |= card_platforms(_CUSTOM_TYPE.findall(text))
+    wide: set[str] = set()
+    location = False
+    for scan in scans:
+        found.update(pattern.findall(scan.text))
+        cards.extend(area_cards(scan.config))
+        platforms |= card_platforms(scan.custom_types())
+        wide |= wide_domains(scan.nodes)
+        location = location or has_location_condition(scan.nodes)
     if cards or platforms:
         # The entities that a card finds in the registries, which the text does not name.
         found |= discovered_entities(cards, platforms, entities)
         found |= area_sensor_entities(hass, cards)
+    # The badge of a person on a tile card, and a condition on the location of the user,
+    # read each zone entity.
+    if location or any(entity_id.startswith("person.") for entity_id in found):
+        wide.add("zone")
+    if wide:
+        found.update(state.entity_id for state in states if state.domain in wide)
+        found.update(entity.entity_id for entity in entities if entity.domain in wide)
+    # The frontend finds the person of the signed-in user by a search of all states, for
+    # a condition on the location of the user and for the picture of the user.
+    users = set(options.get(CONF_USERS, []))
+    found.update(
+        state.entity_id
+        for state in states
+        if state.domain == "person" and state.attributes.get("user_id") in users
+    )
     # The attribute that names the members of an entity, for an entity of an integration
     # with an attribute of its own.
     member_attribute = {
@@ -342,39 +504,62 @@ async def async_dashboard_entities(
                         found.add(member)
                         todo.append(member)
     if include_missing:
-        return found
+        # A name with no state that is the name of an action, such as light.turn_on, is
+        # no entity. Each other name with no state stays: its first state can come later.
+        return {
+            entity_id
+            for entity_id in found
+            if hass.states.get(entity_id) is not None
+            or not hass.services.has_service(*entity_id.split(".", 1))
+        }
     return {e for e in found if hass.states.get(e) is not None}
 
 
 async def async_resolve(
     hass: HomeAssistant, options: dict[str, Any], cache: FileCache
 ) -> Resolution:
-    """Split the resources into those the configured dashboards need and the rest."""
+    """Split the resources into those the configured dashboards need and the rest.
+
+    CannotNarrow is raised when no dashboard of the options exists.
+    """
     result = Resolution(dashboards=list(options.get(CONF_DASHBOARDS, [])))
-    # Match on the path only: the query string carries a version that changes on updates.
-    always = {urlsplit(u).path for u in options.get(CONF_ALWAYS_INCLUDE, [])}
+    # Match on the host and the path: the query string carries a version that changes
+    # on updates.
+    always = {resource_key(u) for u in options.get(CONF_ALWAYS_INCLUDE, [])}
     # Explicit exclusion wins, including over Always include and a real card match.
-    excluded_paths = {urlsplit(u).path for u in options.get(CONF_ALWAYS_EXCLUDE, [])}
+    excluded_keys = {resource_key(u) for u in options.get(CONF_ALWAYS_EXCLUDE, [])}
     include_unscannable = options.get(CONF_INCLUDE_UNSCANNABLE, True)
 
     needed: set[str] = set()
     hints: set[str] = set()
-    for key in result.dashboards:
-        text = await _async_dashboard_text(hass, key)
-        if text is None:
-            continue
-        needed.update(_CUSTOM_TYPE.findall(text))
-        hints.update(sub for k, sub in KEY_HINTS.items() if f'"{k}"' in text)
-        hints.update(sub for v, sub in VALUE_HINTS.items() if f'"{v}"' in text)
+    # A dashboard with no stored configuration holds core cards only, so it needs no
+    # resource.
+    scans, _without_config = await _async_dashboard_scans(hass, result.dashboards)
+    for scan in scans:
+        needed.update(scan.custom_types())
+        named = scan.keys | scan.strings
+        hints.update(sub for k, sub in KEY_HINTS.items() if k in named)
+        hints.update(sub for v, sub in VALUE_HINTS.items() if v in named)
     result.needed_types = sorted(needed)
 
     provided: set[str] = set()
+    # The needed types of the resources that Always exclude names. The user refused their
+    # provider, so no other file is sent for them as a guess.
+    refused: set[str] = set()
+    # The readable files that provide no needed type, with the path of each.
+    unmatched: list[tuple[dict[str, Any], str, frozenset[str]]] = []
     for item in await async_all_resources(hass):
         url = item.get("url", "")
-        if urlsplit(url).path in excluded_paths:
+        if resource_key(url) in excluded_keys:
             result.excluded.append(item)
+            path = url_to_path(hass, url)
+            names = (
+                await hass.async_add_executor_job(cache.names, path) if path else None
+            )
+            refused |= types_for_stem(resource_stem(url), needed)
+            refused |= needed & (names or frozenset())
             continue
-        if urlsplit(url).path in always or item.get("type") == "css":
+        if resource_key(url) in always or item.get("type") == "css":
             result.included.append(item)
             continue
         if any(sub in url for sub in hints):
@@ -400,12 +585,35 @@ async def async_resolve(
         if matched:
             result.included.append(item)
         else:
-            result.excluded.append(item)
+            unmatched.append((item, path, names))
 
-    missing = sorted(needed - provided)
+    # A file can register an element in a way that the scan does not see, such as a
+    # minified decorator. So for a needed type that no file provides, each file that
+    # names the type in quotes is included. A type with a provider never takes this way,
+    # so a file that only mentions a card of another file stays out.
+    guessed: set[str] = set()
+    for item, path, names in unmatched:
+        missing = needed - provided - refused
+        mentioned = (
+            await hass.async_add_executor_job(cache.mentions, path) if missing else None
+        )
+        hit = missing & mentioned if mentioned else set()
+        if hit:
+            guessed |= hit
+            result.included.append(item)
+            continue
+        result.excluded.append(item)
+        url = item.get("url", "")
+        if not names and not stem_names_unused_card(resource_stem(url), needed):
+            # No element that the scan sees, and no file name of a card.
+            result.excluded_without_element.append(url)
+    provided |= guessed
+    result.guessed_types = sorted(guessed)
+
+    missing_types = sorted(needed - provided)
     if any(url_to_path(hass, r.get("url", "")) is None for r in result.included):
         # An included resource we couldn't read may well provide these.
-        result.unverified_types = missing
+        result.unverified_types = missing_types
     else:
-        result.unresolved_types = missing
+        result.unresolved_types = missing_types
     return result

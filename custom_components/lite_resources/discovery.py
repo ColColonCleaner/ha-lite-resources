@@ -21,6 +21,27 @@ from .const import CARD_PLATFORMS
 
 AREA_CARD_TYPE = "area"
 AREA_CONTROLS_FEATURE = "area-controls"
+# A dashboard, a view or a section with this key has no stored cards. The browser makes
+# them from the registries and the states (src/data/lovelace/config/types.ts,
+# isStrategyDashboard, and the same test for a view and a section).
+STRATEGY_KEY = "strategy"
+# Core cards and badges that find their entities by themselves, in a way that no rule of
+# this module follows. The home-summary card filters each entity by domain and area
+# (src/panels/lovelace/cards/hui-home-summary-card.ts). The energy, water, power and gas
+# cards and badges take their entities from the energy settings
+# (src/panels/lovelace/cards/energy/, cards/water/ and badges/energy/).
+UNSCOPED_TYPES = frozenset({"home-summary"})
+UNSCOPED_PREFIXES = ("energy-", "water-", "power-", "gas-")
+# The map card shows each entity of some domains for two of its options
+# (src/panels/lovelace/cards/hui-map-card.ts): `geo_location_sources` gives each
+# geo_location entity, and `show_all` gives each person, device_tracker and zone entity.
+MAP_CARD_TYPE = "map"
+# Core cards that show each entity of a domain. The updates card counts each update entity
+# (src/panels/lovelace/cards/hui-updates-card.ts).
+DOMAIN_CARDS: dict[str, tuple[str, ...]] = {"updates": ("update",)}
+# The visibility condition on the location of the user
+# (src/panels/lovelace/common/validate-condition.ts).
+LOCATION_CONDITION = "location"
 # The domains of the control buttons of the feature "area-controls". The name of a cover
 # control is "cover-" and its device class.
 CONTROL_DOMAINS = ("light", "fan", "switch", "cover")
@@ -120,21 +141,72 @@ def _area_card(card: dict[str, Any]) -> AreaCard:
 
 
 def area_cards(config: Any) -> list[AreaCard]:
-    """Return each area card of a dashboard configuration, at any depth."""
+    """Return each area card of a dashboard configuration, at any depth.
+
+    The configuration of a strategy is left out: a strategy with the type "area" is no
+    area card, and the browser makes its cards.
+    """
     found: list[AreaCard] = []
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
             if node.get("type") == AREA_CARD_TYPE and isinstance(node.get("area"), str):
                 found.append(_area_card(node))
-            for value in node.values():
-                walk(value)
+            for key, value in node.items():
+                if key != STRATEGY_KEY:
+                    walk(value)
         elif isinstance(node, list):
             for value in node:
                 walk(value)
 
     walk(config)
     return found
+
+
+def unscoped_reason(nodes: Iterable[Any]) -> str | None:
+    """Return why the mappings of a dashboard do not say which entities a page needs.
+
+    None means that they do. `nodes` is each mapping of the dashboard configuration.
+    """
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if STRATEGY_KEY in node:
+            return "a strategy, so the browser makes the cards"
+        card_type = node.get("type")
+        if isinstance(card_type, str) and (
+            card_type in UNSCOPED_TYPES or card_type.startswith(UNSCOPED_PREFIXES)
+        ):
+            return f"the card or badge {card_type}, which finds its entities by itself"
+    return None
+
+
+def wide_domains(nodes: Iterable[Any]) -> set[str]:
+    """Return the domains of which a card of the dashboard shows each entity."""
+    domains: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        card_type = node.get("type")
+        if card_type == MAP_CARD_TYPE:
+            if node.get("geo_location_sources"):
+                domains.add("geo_location")
+            if node.get("show_all"):
+                domains.update(("person", "device_tracker", "zone"))
+        elif isinstance(card_type, str):
+            domains.update(DOMAIN_CARDS.get(card_type, ()))
+    return domains
+
+
+def has_location_condition(nodes: Iterable[Any]) -> bool:
+    """True when the dashboard holds a condition on the location of the user.
+
+    The frontend then reads the person entity of the user and the zone entities.
+    """
+    return any(
+        isinstance(node, dict) and node.get("condition") == LOCATION_CONDITION
+        for node in nodes
+    )
 
 
 def card_platforms(custom_types: Iterable[str]) -> set[str]:

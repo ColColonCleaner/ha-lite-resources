@@ -10,10 +10,18 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import sys
+import types
 import unittest
 from types import SimpleNamespace
 
-from support import ConfigSubentry, Event, install_homeassistant_stubs, load
+from support import (
+    ConfigSubentry,
+    Event,
+    empty_filter_part,
+    install_homeassistant_stubs,
+    load,
+)
 
 install_homeassistant_stubs()
 
@@ -39,8 +47,16 @@ USERS = {
 
 
 async def _dashboard_entities(hass, options, include_missing=False) -> set[str]:
-    """Stand-in for resolver.async_dashboard_entities."""
+    """Stand-in for resolver.async_dashboard_entities.
+
+    `hass.scan_suspends` makes the scan wait that number of turns of the event loop, as a
+    first load of a dashboard does. `hass.scan_error` makes it raise that error.
+    """
     hass.include_missing.append(include_missing)
+    for _turn in range(hass.scan_suspends):
+        await asyncio.sleep(0)
+    if hass.scan_error is not None:
+        raise hass.scan_error
     found = set(options.get("extra_entities", []))
     for key in options["dashboards"]:
         found |= hass.dashboard_entities[key]
@@ -54,6 +70,8 @@ async def _resolve(hass, options, cache) -> SimpleNamespace:
         included=included,
         excluded=[{"url": "/local/unused.js"}],
         unresolved_types=[],
+        unverified_types=[],
+        guessed_types=[],
         as_dict=lambda: {"included": [item["url"] for item in included]},
     )
 
@@ -68,7 +86,15 @@ def _forward_entity_changes(send_message, entity_ids, entity_filter, user, messa
 
 
 # The search takes this function only from the module of Home Assistant that defines it.
-_forward_entity_changes.__module__ = "homeassistant.components.websocket_api.commands"
+_COMMANDS = "homeassistant.components.websocket_api.commands"
+_forward_entity_changes.__module__ = _COMMANDS
+_commands = sys.modules.setdefault(_COMMANDS, types.ModuleType(_COMMANDS))
+_commands._forward_entity_changes = _forward_entity_changes
+
+
+def _states_schema(msg: dict) -> dict:
+    """The schema of subscribe_entities: it adds an empty "include" and "exclude"."""
+    return {"include": empty_filter_part(), "exclude": empty_filter_part(), **msg}
 
 
 def _core_subscribe(hass, connection, msg) -> None:
@@ -76,7 +102,12 @@ def _core_subscribe(hass, connection, msg) -> None:
 
     As in Home Assistant, the listener is a partial of _forward_entity_changes in the
     listener list of the event bus, and the connection keeps the function that removes it.
+    The handler reads "include" and "exclude" with no default, as the real one does. So a
+    message that did not pass the schema raises KeyError before a listener exists.
     """
+    if hass.handler_error is not None:
+        raise hass.handler_error
+    msg["include"], msg["exclude"]  # noqa: B018
     call = {"user": connection.user.id, "entity_ids": msg.get("entity_ids"), "ended": False}
     hass.core_subscriptions.append(call)
     listener = functools.partial(
@@ -110,12 +141,23 @@ class _Connection:
         self.subscriptions: dict = {}
         self.results: list = []
         self.messages: list = []
+        self.errors: list = []
 
     def send_result(self, msg_id, result=None) -> None:
         self.results.append((msg_id, result))
 
     def send_message(self, message) -> None:
         self.messages.append(message)
+
+    def async_handle_exception(self, msg, err) -> None:
+        """Home Assistant answers the message with an error."""
+        self.errors.append((msg["id"], err))
+
+    def close(self) -> None:
+        """The connection closes: Home Assistant ends each subscription and forgets it."""
+        for end in list(self.subscriptions.values()):
+            end()
+        self.subscriptions.clear()
 
 
 class _Bus:
@@ -146,6 +188,8 @@ class _Bus:
 class _Services:
     def __init__(self) -> None:
         self.registered: dict = {}
+        # The actions that only an administrator can call.
+        self.admin_only: set = set()
 
     def async_register(self, domain, name, func, supports_response=None) -> None:
         self.registered[(domain, name)] = func
@@ -172,13 +216,18 @@ class _Auth:
 
 
 class _Hass:
-    def __init__(self, is_running: bool = True) -> None:
-        self.is_running = is_running
+    def __init__(self, started: bool = True) -> None:
+        # False while Home Assistant starts. Its property is_running is true in that time
+        # also, so the stand-in has no such attribute.
+        self.started = started
         self.include_missing: list[bool] = []
+        self.scan_suspends = 0
+        self.scan_error: Exception | None = None
+        self.handler_error: Exception | None = None
         self.data = {
             "websocket_api": {
                 "lovelace/resources": (_core_resources, "resources schema"),
-                "subscribe_entities": (_core_subscribe, "states schema"),
+                "subscribe_entities": (_core_subscribe, _states_schema),
             }
         }
         self.bus = _Bus()
@@ -193,8 +242,13 @@ class _Hass:
         self.core_subscriptions: list[dict] = []
         self.tasks: list = []
 
+    @property
+    def loop(self):
+        return asyncio.get_running_loop()
+
     def async_create_task(self, coro, name=None, eager_start=False):
-        task = asyncio.ensure_future(coro)
+        """As in Home Assistant, an eager task runs at once up to its first wait."""
+        task = asyncio.Task(coro, loop=self.loop, eager_start=eager_start)
         self.tasks.append(task)
         return task
 
@@ -202,6 +256,12 @@ class _Hass:
         """Wait for each task that a handler or a listener started."""
         while self.tasks:
             await self.tasks.pop(0)
+
+
+def _subscribe(hass, connection, msg_id: int = 5, **more) -> None:
+    """A page sends subscribe_entities. Home Assistant gives the handler schema(msg)."""
+    handler, schema = hass.data["websocket_api"]["subscribe_entities"]
+    handler(hass, connection, schema({"id": msg_id, "type": "subscribe_entities", **more}))
 
 
 class _Entry:
@@ -252,10 +312,7 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
 
     async def _open_page(self, user_id: str, msg_id: int = 5, **more) -> _Connection:
         connection = _Connection(user_id)
-        handler, _schema = self.commands["subscribe_entities"]
-        handler(
-            self.hass, connection, {"id": msg_id, "type": "subscribe_entities", **more}
-        )
+        _subscribe(self.hass, connection, msg_id, **more)
         await self.hass.drain()
         return connection
 
@@ -405,7 +462,7 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
             self.commands["lovelace/resources"], (_core_resources, "resources schema")
         )
         self.assertEqual(
-            self.commands["subscribe_entities"], (_core_subscribe, "states schema")
+            self.commands["subscribe_entities"], (_core_subscribe, _states_schema)
         )
         self.assertEqual(self.hass.services.registered, {})
         self.assertEqual(self.hass.bus.listeners["lovelace_updated"], [])
@@ -436,7 +493,11 @@ class EarlyPageTest(unittest.IsolatedAsyncioTestCase):
     def _early_page(self, user_id: str, **more) -> _Connection:
         """A page subscribes before the setup, so the handler of Home Assistant answers."""
         connection = _Connection(user_id)
-        _core_subscribe(self.hass, connection, {"id": 5, "type": "subscribe_entities", **more})
+        _core_subscribe(
+            self.hass,
+            connection,
+            _states_schema({"id": 5, "type": "subscribe_entities", **more}),
+        )
         return connection
 
     async def _setup(self) -> None:
@@ -489,9 +550,8 @@ class EarlyPageTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_that_joins_a_group_is_narrowed_at_once(self) -> None:
         await self._setup()
-        handler, _schema = self.hass.data["websocket_api"]["subscribe_entities"]
         tablet = _Connection("u-k")
-        handler(self.hass, tablet, {"id": 7, "type": "subscribe_entities"})
+        _subscribe(self.hass, tablet, 7)
         await self.hass.drain()
         self.assertIsNone(self._calls("u-k")[0]["entity_ids"])
         kitchen = _group("Kitchen tablet", ["u-k"], ["main-dashboard"])
@@ -516,17 +576,18 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         _entry.async_dashboard_entities, _entry.async_resolve = self._saved
 
-    async def _setup(self, is_running: bool):
-        hass = _Hass(is_running=is_running)
+    async def _setup(self, started: bool):
+        hass = _Hass(started=started)
         entry = _Entry(subentries=[_group("Kitchen tablet", ["u-k"], ["main-dashboard"])])
         await _entry.async_setup_entry(hass, entry)
+        # The tasks of the setup run before a page connects.
+        await hass.drain()
         return hass, entry
 
     async def test_page_is_updated_when_the_start_is_complete(self) -> None:
-        hass, entry = await self._setup(is_running=False)
+        hass, entry = await self._setup(started=False)
         connection = _Connection("u-k")
-        handler, _schema = hass.data["websocket_api"]["subscribe_entities"]
-        handler(hass, connection, {"id": 5, "type": "subscribe_entities"})
+        _subscribe(hass, connection)
         await hass.drain()
         # A group entity got its state after the page connected, so it has a member now.
         hass.dashboard_entities["main-dashboard"] = {"light.k", "sensor.b", "light.k_member"}
@@ -541,25 +602,234 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
             func()
 
     async def test_unload_before_the_start_removes_the_listener(self) -> None:
-        hass, entry = await self._setup(is_running=False)
+        hass, entry = await self._setup(started=False)
         self.assertEqual(len(hass.bus.listeners["homeassistant_started"]), 1)
         for func in entry.unload:
             func()
         self.assertEqual(hass.bus.listeners["homeassistant_started"], [])
 
     async def test_running_home_assistant_needs_no_listener(self) -> None:
-        hass, _unused = await self._setup(is_running=True)
+        hass, _unused = await self._setup(started=True)
         self.assertNotIn("homeassistant_started", hass.bus.listeners)
 
     async def test_subscription_asks_for_the_entities_with_no_state_yet(self) -> None:
-        hass, _unused = await self._setup(is_running=True)
-        handler, _schema = hass.data["websocket_api"]["subscribe_entities"]
-        handler(hass, _Connection("u-k"), {"id": 5, "type": "subscribe_entities"})
+        hass, _unused = await self._setup(started=True)
+        _subscribe(hass, _Connection("u-k"))
         await hass.drain()
         self.assertEqual(hass.include_missing, [True])
         # The preview lists the entities that have a state.
         await hass.services.registered[("lite_resources", "preview")](None)
         self.assertEqual(hass.include_missing, [True, False])
+
+
+class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
+    """An open page keeps a state stream through each failure and each change of the setup."""
+
+    async def asyncSetUp(self) -> None:
+        self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
+        _entry.async_dashboard_entities = _dashboard_entities
+        _entry.async_resolve = _resolve
+        self.hass = _Hass()
+        self.entry = _Entry(
+            subentries=[_group("Workshop kiosks", ["u-w1", "u-w2"], ["dashboard-workshop"])]
+        )
+        await _entry.async_setup_entry(self.hass, self.entry)
+        await self.hass.drain()
+
+    async def asyncTearDown(self) -> None:
+        _entry.async_dashboard_entities, _entry.async_resolve = self._saved
+
+    def _calls(self, user_id: str) -> list[dict]:
+        return [c for c in self.hass.core_subscriptions if c["user"] == user_id]
+
+    def _live(self, user_id: str) -> list[dict]:
+        return [c for c in self._calls(user_id) if not c["ended"]]
+
+    async def _open_page(self, user_id: str, msg_id: int = 5) -> _Connection:
+        connection = _Connection(user_id)
+        _subscribe(self.hass, connection, msg_id)
+        await self.hass.drain()
+        return connection
+
+    async def _unload(self) -> None:
+        for func in self.entry.unload:
+            func()
+        await self.hass.drain()
+
+    async def test_unload_gives_each_open_page_all_states_again(self) -> None:
+        kiosk = await self._open_page("u-w1")
+        await self._unload()
+        (live,) = self._live("u-w1")
+        self.assertIsNone(live["entity_ids"])
+        # The page has the result of its subscription. It gets no second one.
+        self.assertEqual(kiosk.results, [(5, None)])
+
+    async def test_reload_narrows_the_open_pages_again(self) -> None:
+        kiosk = await self._open_page("u-w1")
+        await self._unload()
+        entry = _Entry(subentries=list(self.entry.subentries.values()))
+        await _entry.async_setup_entry(self.hass, entry)
+        await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.b"])
+        # The new setup follows a changed dashboard for that page.
+        self.hass.dashboard_entities["dashboard-workshop"] = {"sensor.a", "sensor.c"}
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.c"])
+        self.assertEqual(kiosk.results, [(5, None)])
+
+    async def test_connection_that_closes_during_the_scan_gets_no_listener(self) -> None:
+        self.hass.scan_suspends = 1
+        kiosk = _Connection("u-w1")
+        _subscribe(self.hass, kiosk)
+        # The scan waits. The page leaves before the scan ends.
+        kiosk.close()
+        await self.hass.drain()
+        self.assertEqual(self._calls("u-w1"), [])
+        self.assertEqual(kiosk.subscriptions, {})
+        self.assertEqual(self.hass.bus._listeners.get("state_changed", []), [])
+        preview = self.hass.services.registered[("lite_resources", "preview")]
+        self.assertEqual((await preview(None))["open_pages_with_narrowed_states"], 0)
+
+    async def test_page_that_waits_for_the_scan_is_narrowed(self) -> None:
+        self.hass.scan_suspends = 2
+        kiosk = _Connection("u-w1")
+        _subscribe(self.hass, kiosk)
+        await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.b"])
+        self.assertEqual(kiosk.results, [(5, None)])
+
+    async def test_two_changes_at_one_time_leave_the_newer_set(self) -> None:
+        await self._open_page("u-w1")
+        self.hass.scan_suspends = 3
+        self.hass.dashboard_entities["dashboard-workshop"] = {"sensor.a", "sensor.c"}
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        # The second save comes while the scan of the first one waits.
+        await asyncio.sleep(0)
+        self.hass.dashboard_entities["dashboard-workshop"] = {"sensor.a", "sensor.c", "light.k"}
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["light.k", "sensor.a", "sensor.c"])
+
+    async def test_scan_that_fails_gives_a_new_page_all_states(self) -> None:
+        self.hass.scan_error = RuntimeError("the scan failed")
+        with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            kiosk = await self._open_page("u-w1")
+        (live,) = self._live("u-w1")
+        self.assertIsNone(live["entity_ids"])
+        self.assertEqual(kiosk.results, [(5, None)])
+        self.assertEqual(kiosk.errors, [])
+
+    async def test_scan_that_fails_leaves_an_open_page_as_it_is(self) -> None:
+        await self._open_page("u-w1")
+        self.hass.scan_error = RuntimeError("the scan failed")
+        with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+            await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.b"])
+
+    async def test_handler_that_fails_gives_the_page_an_error_message(self) -> None:
+        self.hass.handler_error = RuntimeError("the handler failed")
+        with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            kiosk = await self._open_page("u-w1")
+        # The narrowed call failed, and the call for all states failed too. The page gets
+        # the error, as it does from a handler of Home Assistant.
+        self.assertEqual([msg_id for msg_id, _err in kiosk.errors], [5])
+        self.assertEqual(kiosk.subscriptions, {})
+
+    async def test_dashboard_that_cannot_be_narrowed_gives_all_states(self) -> None:
+        self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            await self._open_page("u-w1")
+            await self._open_page("u-w2", msg_id=6)
+        # The reason is in the log one time, and not one time for each page.
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("strategy", logs.records[0].getMessage())
+        self.assertIsNone(self._live("u-w1")[0]["entity_ids"])
+        # When the dashboard names its entities again, the open pages are narrowed.
+        self.hass.scan_error = None
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        await self.hass.drain()
+        self.assertEqual(self._live("u-w1")[0]["entity_ids"], ["sensor.a", "sensor.b"])
+        self.assertEqual(self._live("u-w2")[0]["entity_ids"], ["sensor.a", "sensor.b"])
+
+    async def test_open_page_gets_all_states_when_its_dashboard_cannot_be_narrowed(self) -> None:
+        await self._open_page("u-w1")
+        self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
+        with self.assertLogs(_entry._LOGGER, level="WARNING"):
+            self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+            await self.hass.drain()
+        (live,) = self._live("u-w1")
+        self.assertIsNone(live["entity_ids"])
+
+    async def test_registry_change_updates_the_open_pages_one_time(self) -> None:
+        await self._open_page("u-w1")
+        saved = _entry.REGISTRY_REFRESH_DELAY
+        _entry.REGISTRY_REFRESH_DELAY = 0
+        try:
+            # A new entity enters the area of an area card: the registry fires a burst.
+            self.hass.dashboard_entities["dashboard-workshop"] = {"sensor.a", "sensor.b", "light.k"}
+            scans = len(self.hass.include_missing)
+            for _event in range(5):
+                self.hass.bus.fire("entity_registry_updated", {"action": "update"})
+            self.hass.bus.fire("device_registry_updated", {"action": "update"})
+            await asyncio.sleep(0.01)
+            await self.hass.drain()
+        finally:
+            _entry.REGISTRY_REFRESH_DELAY = saved
+        (live,) = self._live("u-w1")
+        self.assertEqual(live["entity_ids"], ["light.k", "sensor.a", "sensor.b"])
+        self.assertEqual(len(self.hass.include_missing), scans + 1)
+
+    async def test_registry_change_with_no_open_page_does_nothing(self) -> None:
+        scans = len(self.hass.include_missing)
+        self.hass.bus.fire("area_registry_updated", {"action": "update"})
+        await asyncio.sleep(0.01)
+        await self.hass.drain()
+        self.assertEqual(len(self.hass.include_missing), scans)
+
+    async def test_preview_is_for_administrators_only(self) -> None:
+        self.assertIn(("lite_resources", "preview"), self.hass.services.admin_only)
+
+    async def test_preview_says_why_a_group_is_not_narrowed(self) -> None:
+        self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
+        preview = self.hass.services.registered[("lite_resources", "preview")]
+        (group,) = (await preview(None))["groups"]
+        self.assertEqual(group["states_not_narrowed"], "the dashboard holds a strategy")
+        self.assertNotIn("state_entities", group)
+
+    async def test_unload_keeps_the_handler_of_another_integration(self) -> None:
+        commands = self.hass.data["websocket_api"]
+
+        def other_handler(hass, connection, msg) -> None:
+            """A handler that another integration registered after this one."""
+
+        commands["subscribe_entities"] = (other_handler, _states_schema)
+        with self.assertLogs(_entry._LOGGER, level="WARNING"):
+            await self._unload()
+        self.assertIs(commands["subscribe_entities"][0], other_handler)
+        self.assertIs(commands["lovelace/resources"][0], _core_resources)
+
+    async def test_user_in_two_groups_is_reported(self) -> None:
+        second = _group("Hall panel", ["u-w1"], ["main-dashboard"])
+        self.entry.subentries = {**self.entry.subentries, second.subentry_id: second}
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            for listener in self.entry.update_listeners:
+                await listener(self.hass, self.entry)
+        self.assertIn("more than one group", logs.records[0].getMessage())
+
+    async def test_setup_reports_internals_of_another_layout(self) -> None:
+        hass = _Hass()
+        del hass.bus._listeners
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            await _entry.async_setup_entry(hass, _Entry())
+            await hass.drain()
+        self.assertIn("keeps all states", logs.records[0].getMessage())
 
 
 class SetupWithoutLovelaceTest(unittest.IsolatedAsyncioTestCase):
@@ -593,6 +863,14 @@ class MigrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(group.subentry_type, "group")
         self.assertEqual(group.title, "Lite users")
         self.assertEqual(dict(group.data), options)
+
+    async def test_setup_with_no_state_filter_option_keeps_the_filter_off(self) -> None:
+        # A version with no such option did not narrow the states. The form of a group
+        # shows a missing option as on, so the group states that it is off.
+        entry = _Entry(version=1, options={"users": ["u-w1"], "dashboards": ["dashboard-workshop"]})
+        self.assertTrue(await _entry.async_migrate_entry(_Hass(), entry))
+        (group,) = entry.subentries.values()
+        self.assertIs(group.data["filter_states"], False)
 
     async def test_setup_without_users_gets_no_group(self) -> None:
         entry = _Entry(version=1, options={"users": [], "dashboards": []})

@@ -51,13 +51,36 @@ def _multi(options: list[SelectOptionDict]) -> SelectSelector:
     )
 
 
-async def _async_group_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
-    """Return the form of one group, with `current` as the values that it shows."""
+def _with_stored(
+    options: list[SelectOptionDict], stored: Any, label: str
+) -> list[SelectOptionDict]:
+    """Return the options, with each stored value that is no option any more.
+
+    A select field refuses a value outside its options. A group can hold a user or a
+    dashboard that was deleted, or a resource URL whose version changed. Without that
+    value among the options, the form of the group cannot be saved.
+    """
+    known = {option["value"] for option in options}
+    gone = [value for value in stored or [] if isinstance(value, str) and value not in known]
+    return options + [
+        SelectOptionDict(value=value, label=label.format(value)) for value in gone
+    ]
+
+
+async def _async_group_schema(
+    hass: HomeAssistant, current: dict[str, Any], new_group: bool
+) -> vol.Schema:
+    """Return the form of one group, with `current` as the values that it shows.
+
+    The state filter of a new group is on. A stored group with no such value does not
+    narrow the states, so its form shows the filter as off.
+    """
     users = [
         SelectOptionDict(value=u.id, label=u.name or u.id)
         for u in await hass.auth.async_get_users()
         if not u.system_generated and u.is_active
     ]
+    users = _with_stored(users, current.get(CONF_USERS), "{} (user not found)")
     dashboards = []
     for url_path, dashboard in hass.data[LOVELACE_DATA].dashboards.items():
         if url_path is None:
@@ -67,10 +90,20 @@ async def _async_group_schema(hass: HomeAssistant, current: dict[str, Any]) -> v
             continue
         title = (getattr(dashboard, "config", None) or {}).get("title") or url_path
         dashboards.append(SelectOptionDict(value=url_path, label=f"{title} ({url_path})"))
+    dashboards = _with_stored(
+        dashboards, current.get(CONF_DASHBOARDS), "{} (dashboard not found)"
+    )
     resources = [
         SelectOptionDict(value=r["url"], label=r["url"])
         for r in await async_all_resources(hass)
     ]
+    stored_resources = [
+        *current.get(CONF_ALWAYS_INCLUDE, []),
+        *current.get(CONF_ALWAYS_EXCLUDE, []),
+    ]
+    resources = _with_stored(
+        resources, stored_resources, "{} (not in the resource list now)"
+    )
     return vol.Schema(
         {
             vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): TextSelector(),
@@ -79,7 +112,8 @@ async def _async_group_schema(hass: HomeAssistant, current: dict[str, Any]) -> v
                 CONF_DASHBOARDS, default=current.get(CONF_DASHBOARDS, [])
             ): _multi(dashboards),
             vol.Required(
-                CONF_FILTER_STATES, default=current.get(CONF_FILTER_STATES, True)
+                CONF_FILTER_STATES,
+                default=bool(current.get(CONF_FILTER_STATES, new_group)),
             ): BooleanSelector(),
             vol.Optional(
                 CONF_EXTRA_ENTITIES, default=current.get(CONF_EXTRA_ENTITIES, [])
@@ -149,7 +183,7 @@ class GroupSubentryFlow(ConfigSubentryFlow):
                 return self.async_create_entry(title=name, data=data)
         return self.async_show_form(
             step_id="user",
-            data_schema=await _async_group_schema(self.hass, user_input or {}),
+            data_schema=await _async_group_schema(self.hass, user_input or {}, True),
             errors=errors,
         )
 
@@ -172,6 +206,6 @@ class GroupSubentryFlow(ConfigSubentryFlow):
         current = user_input or {CONF_NAME: subentry.title, **subentry.data}
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=await _async_group_schema(self.hass, current),
+            data_schema=await _async_group_schema(self.hass, current, False),
             errors=errors,
         )

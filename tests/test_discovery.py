@@ -170,7 +170,11 @@ def _entry(entity_id, **more) -> SimpleNamespace:
 class _States:
     def __init__(self, states: dict[str, dict]) -> None:
         self._states = {
-            entity_id: SimpleNamespace(domain=entity_id.partition(".")[0], attributes=attributes)
+            entity_id: SimpleNamespace(
+                entity_id=entity_id,
+                domain=entity_id.partition(".")[0],
+                attributes=attributes,
+            )
             for entity_id, attributes in states.items()
         }
 
@@ -236,6 +240,7 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
             entity_registry=SimpleNamespace(entities={entry.entity_id: entry for entry in entries}),
             device_registry=SimpleNamespace(async_get=devices.get),
             area_registry=SimpleNamespace(async_get_area=areas.get),
+            services=_Services(),
         )
 
     async def test_area_cards_and_scheduler_card_add_their_entities(self) -> None:
@@ -266,6 +271,13 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(found, {"sun.sun", "lock.side_door"})
 
 
+class _Services:
+    """The actions of the home: light.turn_on and no other."""
+
+    def has_service(self, domain: str, service: str) -> bool:
+        return (domain, service) == ("light", "turn_on")
+
+
 class StartupTest(unittest.IsolatedAsyncioTestCase):
     """A page that connects while Home Assistant starts.
 
@@ -288,7 +300,8 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
         ]
         dashboard = {"views": [{"cards": [
             CAMERA_CARD,
-            {"type": "tile", "entity": "lock.side_door"},
+            {"type": "tile", "entity": "lock.side_door",
+             "tap_action": {"action": "perform-action", "perform_action": "light.turn_on"}},
             {"type": "picture-entity", "entity": "camera.side_door"},
         ]}]}
         self.hass = SimpleNamespace(
@@ -301,6 +314,7 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
                     temperature_entity_id=None, humidity_entity_id=None
                 )
             ),
+            services=_Services(),
         )
 
     async def test_subscription_holds_the_entities_with_no_state_yet(self) -> None:
@@ -313,6 +327,8 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("binary_sensor.doorbell_side_motion", found)
         self.assertIn("light.side_door", found)
         self.assertNotIn("binary_sensor.side_door_open", found)
+        # The name of an action is no entity, so the subscription does not ask for it.
+        self.assertNotIn("light.turn_on", found)
 
     async def test_list_of_the_entities_holds_only_those_with_a_state(self) -> None:
         found = await _resolver.async_dashboard_entities(self.hass, {"dashboards": ["kitchen"]})

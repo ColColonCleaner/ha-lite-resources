@@ -52,6 +52,11 @@ class ReleaseMetadataTest(unittest.TestCase):
         self.assertNotIn("ignore:", workflow)
         self.assertNotIn("ignore ", workflow)
 
+    def test_validation_workflow_runs_the_unit_tests(self) -> None:
+        """A push that breaks a unit test fails the workflow."""
+        workflow = (ROOT / ".github" / "workflows" / "validate.yaml").read_text()
+        self.assertIn("-m unittest discover -s tests", workflow)
+
     def test_brand_icon_present(self) -> None:
         """The brands check looks for brand/icon.png."""
         icon = INTEGRATION / "brand" / "icon.png"

@@ -19,3 +19,12 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The unit tests run against stand-ins for Home Assistant. They need Python 3.12 or
+      # later and the package voluptuous.
+      - run: python3 -m venv .venv
+      - run: .venv/bin/python -m pip install voluptuous
+      - run: .venv/bin/python -m unittest discover -s tests
