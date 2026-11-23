@@ -79,6 +79,12 @@ Design the dashboards as a normal user, with every resource loaded. When you sav
 
 A change of a group, such as a new user or a new dashboard, reaches the open panels the same way.
 
+### After a restart of Home Assistant
+
+A panel connects again within seconds of a restart. Home Assistant sets a custom integration up some seconds later, so the first state subscription of the panel is for every entity. When the setup of Lite Resources runs, it finds that subscription and narrows it. The panel then drops the entities that its dashboards do not show, and it keeps its connection.
+
+One fault stays, and it is not in this integration. After a restart, a card with a camera can show no camera until the page loads again. In one home, a panel asked for its cameras 9 seconds after the start, and Home Assistant answered `Camera not found`, because the camera integration was not ready. So let each panel load its page again some minutes after a restart, for example with the reload timer of its kiosk browser.
+
 ## Install
 
 Lite Resources needs Home Assistant 2026.11 or later.

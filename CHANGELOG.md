@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.4 - 2026-11-23
+
+- **A panel stays a lite panel across a restart of Home Assistant.** After a restart, a panel connects again within seconds, before Home Assistant sets a custom integration up. The handler of Home Assistant then answered the state subscription of the panel, with every entity. On one kiosk the page went from 95 entities to 5,573, and it fell more than 200 seconds behind for 10 minutes, until its connection broke. Lite Resources now finds such a subscription when its setup runs, and narrows it in place: the panel drops the entities that its dashboards do not show, and it keeps its connection.
+- A user that joins a group gets the narrowed stream at once on each open page, in the same way.
+- The search for those subscriptions reads internals of Home Assistant 2026.11: the listener list of the event bus. On a version with another layout it finds nothing, and a panel then gets its narrowed stream at its next connection, as before.
+
 ## 0.3.3 - 2026-11-23
 
 - **The instructions say where each action is.** The README gives each step of the install and of the setup. **Add group** is the button in the upper-right corner of the page of the integration, and an item of the three-dot menu of the entry. The cog icon of a group changes it, and the three-dot menu of a group renames or deletes it. A picture shows that page.

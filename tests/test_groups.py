@@ -6,6 +6,7 @@ one dashboard, and a kitchen tablet, which shows another.
 
 from __future__ import annotations
 
+import functools
 import unittest
 from types import SimpleNamespace
 
@@ -225,6 +226,102 @@ class LiveSubscriptionsTest(unittest.TestCase):
         other = next(item for item in self.live.items() if item.msg["id"] == 9)
         self.assertEqual(other.entities, {"light.k"})
         self.assertFalse(self.core.calls[1]["ended"])
+
+
+def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
+    """Stand-in for the listener of Home Assistant with the same name and arguments."""
+
+
+def _other_listener(event):
+    """A listener of another integration."""
+
+
+def _job(connection, msg_id, entity_ids=None, entity_filter=None, func=_forward_entity_changes):
+    """One item of the listener list of the event bus, in the layout of Home Assistant."""
+    listener = functools.partial(
+        func, connection.send_message, entity_ids, entity_filter, connection.user, str(msg_id).encode()
+    )
+    return (SimpleNamespace(target=listener), None)
+
+
+class UnfilteredSubscriptionsTest(unittest.TestCase):
+    """The state subscriptions for all entities that the event bus holds."""
+
+    def setUp(self) -> None:
+        self.page = _Connection()
+        self.page.subscriptions[5] = lambda: None
+
+    def _found(self, *jobs):
+        bus = SimpleNamespace(_listeners={"state_changed": list(jobs)})
+        return _groups.unfiltered_state_subscriptions(bus)
+
+    def test_subscription_for_all_entities_is_found(self) -> None:
+        self.assertEqual(self._found(_job(self.page, 5)), [(self.page, 5)])
+
+    def test_subscription_with_a_list_or_a_filter_is_left_out(self) -> None:
+        self.assertEqual(self._found(_job(self.page, 5, entity_ids={"sensor.a"})), [])
+        self.assertEqual(self._found(_job(self.page, 5, entity_filter=lambda e: True)), [])
+
+    def test_other_listeners_are_left_out(self) -> None:
+        plain = (SimpleNamespace(target=_other_listener), None)
+        other = _job(self.page, 5, func=_other_listener)
+        broken = ("not a job",)
+        self.assertEqual(self._found(plain, other, broken), [])
+
+    def test_subscription_that_the_page_ended_is_left_out(self) -> None:
+        self.assertEqual(self._found(_job(self.page, 9)), [])
+
+    def test_event_bus_of_another_layout_gives_nothing(self) -> None:
+        self.assertEqual(_groups.unfiltered_state_subscriptions(SimpleNamespace()), [])
+        self.assertEqual(
+            _groups.unfiltered_state_subscriptions(SimpleNamespace(_listeners={})), []
+        )
+
+
+class AdoptTest(unittest.TestCase):
+    """A subscription for all entities that the handler of Home Assistant made."""
+
+    def setUp(self) -> None:
+        self.core = _Core()
+        self.live = LiveSubscriptions(self.core.subscribe)
+        self.connection = _Connection()
+        # The page subscribed with the handler of Home Assistant.
+        self.core.subscribe(self.connection, {"id": 5, "type": "subscribe_entities"})
+
+    def test_adopted_subscription_is_narrowed_in_place(self) -> None:
+        held = ["sensor.a", "sensor.b", "sensor.other"]
+        self.assertTrue(self.live.adopt(self.connection, 5, held, {"sensor.a", "sensor.b"}))
+        self.assertTrue(self.core.calls[0]["ended"])
+        self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.b"])
+        self.assertEqual(self.connection.results, [5])
+        self.assertEqual(
+            self.connection.messages[-1],
+            {"id": 5, "type": "event", "event": {"r": ["sensor.other"]}},
+        )
+        self.assertEqual(len(self.live), 1)
+
+    def test_adopted_subscription_is_narrowed_also_when_the_page_holds_no_other_entity(self) -> None:
+        # Early in a start, the page can hold only entities of its dashboards.
+        self.assertTrue(self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a", "sensor.b"}))
+        self.assertTrue(self.core.calls[0]["ended"])
+        self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.b"])
+
+    def test_adopted_subscription_follows_a_later_change(self) -> None:
+        self.live.adopt(self.connection, 5, ["sensor.a", "sensor.x"], {"sensor.a"})
+        item = self.live.items()[0]
+        self.assertTrue(self.live.update(item, {"sensor.a", "sensor.c"}))
+        self.assertEqual(self.core.calls[-1]["entity_ids"], ["sensor.a", "sensor.c"])
+
+    def test_missing_subscription_is_not_adopted(self) -> None:
+        self.assertFalse(self.live.adopt(self.connection, 9, ["sensor.a"], {"sensor.a"}))
+        self.assertEqual(len(self.core.calls), 1)
+
+    def test_subscription_of_this_object_is_not_adopted(self) -> None:
+        other = _Connection()
+        self.live.start(other, {"id": 7, "type": "subscribe_entities"}, {"sensor.a"})
+        self.assertFalse(self.live.adopt(other, 7, ["sensor.a", "sensor.b"], {"sensor.b"}))
+        self.assertEqual(self.live.items()[0].entities, {"sensor.a"})
+        self.assertIn(7, other.subscriptions)
 
 
 if __name__ == "__main__":

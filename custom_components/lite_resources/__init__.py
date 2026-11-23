@@ -49,6 +49,7 @@ from .groups import (
     groups_from_subentries,
     groups_with_dashboard,
     legacy_group_data,
+    unfiltered_state_subscriptions,
 )
 from .resolver import FileCache, async_dashboard_entities, async_resolve
 
@@ -229,9 +230,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if affected and len(live):
             hass.async_create_task(refresh_live({group.group_id for group in affected}))
 
+    async def adopt_unfiltered() -> None:
+        """Narrow each state subscription for all entities that a page of a lite user holds.
+
+        After a restart of Home Assistant, a page connects again before this setup runs.
+        The handler of Home Assistant then answers its state subscription, with every
+        entity. A user that joins a group holds such a subscription too.
+        """
+        current = groups()
+        sets: dict[str, set[str]] = {}
+        for connection, msg_id in unfiltered_state_subscriptions(hass.bus):
+            user = connection.user
+            group = group_for_user(current, user.id if user is not None else None)
+            if group is None or not group.filter_states:
+                continue
+            if group.group_id not in sets:
+                sets[group.group_id] = await entities_of(group)
+            entities = sets[group.group_id]
+            if not entities:
+                continue
+            if live.adopt(connection, msg_id, hass.states.async_entity_ids(), entities):
+                _LOGGER.debug(
+                    "%s (group %s) had a subscription to all states; it now gets %d entities",
+                    user.name,
+                    group.name,
+                    len(entities),
+                )
+
     async def groups_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
         """A group was added, changed or removed: update the open pages."""
         await refresh_live()
+        await adopt_unfiltered()
 
     # The function that removes the listener for the end of the start, while it waits.
     cancel_started: list[Any] = []
@@ -289,6 +318,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(restore)
     entry.async_on_unload(hass.bus.async_listen(EVENT_LOVELACE_UPDATED, dashboard_updated))
     entry.async_on_unload(entry.add_update_listener(groups_updated))
+    # The pages that connected before this setup hold a subscription to all states.
+    hass.async_create_task(adopt_unfiltered())
     return True
 
 

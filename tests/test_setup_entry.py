@@ -9,6 +9,7 @@ stand-ins answer for it from a table.
 from __future__ import annotations
 
 import asyncio
+import functools
 import unittest
 from types import SimpleNamespace
 
@@ -20,6 +21,14 @@ load("lite_resources.const", "const.py")
 load("lite_resources.groups", "groups.py")
 load("lite_resources.resolver", "resolver.py")
 _entry = load("lite_resources.entry_module", "__init__.py")
+
+# The 5000 entities of the home. The dashboards of the groups show four of them.
+ALL_ENTITIES = [f"sensor.other_{number}" for number in range(4996)] + [
+    "sensor.a",
+    "sensor.b",
+    "light.k",
+    "sensor.c",
+]
 
 USERS = {
     "u-w1": "Workshop Kiosk 1",
@@ -54,13 +63,33 @@ def _core_resources(hass, connection, msg) -> None:
     connection.send_result(msg["id"], "every resource")
 
 
+def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
+    """Stand-in for the listener of Home Assistant with the same name and arguments."""
+
+
 def _core_subscribe(hass, connection, msg) -> None:
-    """The subscribe_entities handler of Home Assistant, reduced to what the pages see."""
+    """The subscribe_entities handler of Home Assistant, reduced to what the pages see.
+
+    As in Home Assistant, the listener is a partial of _forward_entity_changes in the
+    listener list of the event bus, and the connection keeps the function that removes it.
+    """
     call = {"user": connection.user.id, "entity_ids": msg.get("entity_ids"), "ended": False}
     hass.core_subscriptions.append(call)
+    listener = functools.partial(
+        _forward_entity_changes,
+        connection.send_message,
+        set(msg["entity_ids"]) if msg.get("entity_ids") else None,
+        None,
+        connection.user,
+        str(msg["id"]).encode(),
+    )
+    job = (SimpleNamespace(target=listener), None)
+    listeners = hass.bus._listeners.setdefault("state_changed", [])
+    listeners.append(job)
 
     def end() -> None:
         call["ended"] = True
+        listeners.remove(job)
 
     connection.subscriptions[msg["id"]] = end
     connection.send_result(msg["id"])
@@ -88,6 +117,8 @@ class _Connection:
 class _Bus:
     def __init__(self) -> None:
         self.listeners: dict[str, list] = {}
+        # The listener list of the event bus of Home Assistant, for the state listeners.
+        self._listeners: dict[str, list] = {}
 
     def async_listen(self, event_type, listener):
         self.listeners.setdefault(event_type, []).append(listener)
@@ -150,7 +181,7 @@ class _Hass:
         self.services = _Services()
         self.config_entries = _ConfigEntries()
         self.auth = _Auth()
-        self.states = SimpleNamespace(async_entity_ids=lambda: ["e"] * 5000)
+        self.states = SimpleNamespace(async_entity_ids=lambda: list(ALL_ENTITIES))
         self.dashboard_entities = {
             "dashboard-workshop": {"sensor.a", "sensor.b"},
             "main-dashboard": {"light.k", "sensor.b"},
@@ -375,6 +406,99 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.services.registered, {})
         self.assertEqual(self.hass.bus.listeners["lovelace_updated"], [])
         self.assertEqual(self.entry.update_listeners, [])
+
+
+class EarlyPageTest(unittest.IsolatedAsyncioTestCase):
+    """A page that connected before Home Assistant set the integration up.
+
+    After a restart, a kiosk page connects again within seconds. Home Assistant sets a
+    custom integration up later, so the handler of Home Assistant answers the first state
+    subscription of that page, with every entity. One kiosk went from 95 entities to
+    5573 that way, and its page fell 200 seconds behind.
+    """
+
+    async def asyncSetUp(self) -> None:
+        self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
+        _entry.async_dashboard_entities = _dashboard_entities
+        _entry.async_resolve = _resolve
+        self.hass = _Hass()
+        self.entry = _Entry(
+            subentries=[_group("Workshop kiosks", ["u-w1", "u-w2"], ["dashboard-workshop"])]
+        )
+
+    async def asyncTearDown(self) -> None:
+        _entry.async_dashboard_entities, _entry.async_resolve = self._saved
+
+    def _early_page(self, user_id: str, **more) -> _Connection:
+        """A page subscribes before the setup, so the handler of Home Assistant answers."""
+        connection = _Connection(user_id)
+        _core_subscribe(self.hass, connection, {"id": 5, "type": "subscribe_entities", **more})
+        return connection
+
+    async def _setup(self) -> None:
+        await _entry.async_setup_entry(self.hass, self.entry)
+        await self.hass.drain()
+
+    def _calls(self, user_id: str) -> list[dict]:
+        return [c for c in self.hass.core_subscriptions if c["user"] == user_id]
+
+    async def test_early_page_of_a_lite_user_is_narrowed_at_the_setup(self) -> None:
+        kiosk = self._early_page("u-w1")
+        await self._setup()
+        first, second = self._calls("u-w1")
+        self.assertTrue(first["ended"])
+        self.assertEqual(second["entity_ids"], ["sensor.a", "sensor.b"])
+        self.assertFalse(second["ended"])
+        # The page has the result of its subscription. It gets no second one.
+        self.assertEqual(kiosk.results, [(5, None)])
+        # The page drops each entity that it holds and that its dashboards do not show.
+        removed = kiosk.messages[-1]["event"]["r"]
+        self.assertEqual(len(removed), 4998)
+        self.assertIn("sensor.other_0", removed)
+        self.assertIn("light.k", removed)
+        self.assertNotIn("sensor.a", removed)
+        # The narrowed subscription follows a changed dashboard like any other.
+        self.hass.dashboard_entities["dashboard-workshop"] = {"sensor.a", "sensor.c"}
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        await self.hass.drain()
+        self.assertEqual(self._calls("u-w1")[-1]["entity_ids"], ["sensor.a", "sensor.c"])
+
+    async def test_early_page_of_another_user_keeps_every_state(self) -> None:
+        phone = self._early_page("u-phone")
+        await self._setup()
+        (call,) = self._calls("u-phone")
+        self.assertFalse(call["ended"])
+        self.assertEqual(len(phone.messages), 1)
+
+    async def test_early_subscription_with_its_own_entities_is_not_changed(self) -> None:
+        self._early_page("u-w1", entity_ids=["sensor.c"])
+        await self._setup()
+        (call,) = self._calls("u-w1")
+        self.assertFalse(call["ended"])
+
+    async def test_event_bus_of_another_layout_changes_nothing(self) -> None:
+        self._early_page("u-w1")
+        del self.hass.bus._listeners
+        await self._setup()
+        (call,) = self._calls("u-w1")
+        self.assertFalse(call["ended"])
+
+    async def test_user_that_joins_a_group_is_narrowed_at_once(self) -> None:
+        await self._setup()
+        handler, _schema = self.hass.data["websocket_api"]["subscribe_entities"]
+        tablet = _Connection("u-k")
+        handler(self.hass, tablet, {"id": 7, "type": "subscribe_entities"})
+        await self.hass.drain()
+        self.assertIsNone(self._calls("u-k")[0]["entity_ids"])
+        kitchen = _group("Kitchen tablet", ["u-k"], ["main-dashboard"])
+        self.entry.subentries = {**self.entry.subentries, kitchen.subentry_id: kitchen}
+        for listener in self.entry.update_listeners:
+            await listener(self.hass, self.entry)
+        await self.hass.drain()
+        first, second = self._calls("u-k")
+        self.assertTrue(first["ended"])
+        self.assertEqual(second["entity_ids"], ["light.k", "sensor.b"])
+        self.assertEqual(tablet.results, [(7, None)])
 
 
 class StartupTest(unittest.IsolatedAsyncioTestCase):

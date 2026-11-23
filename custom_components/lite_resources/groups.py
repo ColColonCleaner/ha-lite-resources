@@ -7,6 +7,7 @@ plain unit test.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,7 @@ from .const import (
     CONF_USERS,
     DEFAULT_DASHBOARD,
     SUBENTRY_GROUP,
+    WS_SUBSCRIBE_ENTITIES,
 )
 
 # The keys of the data of a group. The group name is the title of its subentry.
@@ -37,6 +39,13 @@ GROUP_KEYS = (
 # The key of the removal list in an entity event of the subscribe_entities stream, as
 # homeassistant.components.websocket_api.messages.ENTITY_EVENT_REMOVE defines it.
 ENTITY_EVENT_REMOVE = "r"
+
+# The event of a state change, as homeassistant.const.EVENT_STATE_CHANGED defines it.
+EVENT_STATE_CHANGED = "state_changed"
+
+# The function of homeassistant.components.websocket_api.commands that forwards the state
+# changes of a subscribe_entities subscription to its page.
+CORE_FORWARD_FUNCTION = "_forward_entity_changes"
 
 
 @dataclass(frozen=True)
@@ -114,6 +123,44 @@ def legacy_group_data(options: Mapping[str, Any]) -> dict[str, Any] | None:
     if not options.get(CONF_USERS):
         return None
     return {key: options[key] for key in GROUP_KEYS if key in options}
+
+
+def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
+    """Return each state subscription for all entities, as (connection, subscription ID).
+
+    Home Assistant keeps no list of its websocket connections. Its subscribe_entities
+    handler puts a listener for state changes on the event bus: a partial of the function
+    CORE_FORWARD_FUNCTION with the arguments (send_message, entity_ids, entity_filter,
+    user, message ID as bytes). `send_message` is a method of the connection, and
+    `entity_ids` and `entity_filter` are None for a subscription to all entities.
+
+    This reads internals of Home Assistant: the listener list of the event bus and that
+    partial. An item of another layout is left out, so a later version of Home Assistant
+    with another layout gives an empty list.
+    """
+    found: list[tuple[Any, int]] = []
+    try:
+        listeners = list(bus._listeners.get(EVENT_STATE_CHANGED, ()))
+    except AttributeError:
+        return found
+    for item in listeners:
+        try:
+            target = item[0].target
+            if (
+                not isinstance(target, functools.partial)
+                or getattr(target.func, "__name__", None) != CORE_FORWARD_FUNCTION
+            ):
+                continue
+            send_message, entity_ids, entity_filter, _user, message_id = target.args[:5]
+            if entity_ids is not None or entity_filter is not None:
+                continue
+            connection = send_message.__self__
+            msg_id = int(message_id)
+            if msg_id in connection.subscriptions:
+                found.append((connection, msg_id))
+        except (AttributeError, IndexError, TypeError, ValueError):
+            continue
+    return found
 
 
 class _QuietConnection:
@@ -204,6 +251,45 @@ class LiveSubscriptions:
                 }
             )
         self._track(_Live(live.connection, live.msg, wanted))
+        return True
+
+    def adopt(
+        self,
+        connection: Any,
+        msg_id: Any,
+        held: Iterable[str],
+        entities: Iterable[str],
+    ) -> bool:
+        """Narrow a subscription for all entities that this object did not make.
+
+        A page makes such a subscription when the handler of Home Assistant answers it,
+        before this integration is set up. `held` is each entity that the page can hold
+        now. The page keeps its subscription ID. It receives the states of `entities`, and
+        a removal for each other entity of `held`. Returns False when the page has no
+        subscription with this ID.
+        """
+        key = (id(connection), msg_id)
+        ended = connection.subscriptions.pop(msg_id, None)
+        if ended is None or key in self._live:
+            if ended is not None:
+                connection.subscriptions[msg_id] = ended
+            return False
+        ended()
+        wanted = frozenset(entities)
+        msg = {"id": msg_id, "type": WS_SUBSCRIBE_ENTITIES}
+        self._subscribe(
+            _QuietConnection(connection), {**msg, "entity_ids": sorted(wanted)}
+        )
+        removed = frozenset(held) - wanted
+        if removed:
+            connection.send_message(
+                {
+                    "id": msg_id,
+                    "type": "event",
+                    "event": {ENTITY_EVENT_REMOVE: sorted(removed)},
+                }
+            )
+        self._track(_Live(connection, msg, wanted))
         return True
 
     def _track(self, live: _Live) -> None:
