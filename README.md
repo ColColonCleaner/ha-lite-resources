@@ -87,9 +87,7 @@ Lite Resources needs Home Assistant 2026.11 or later.
 
 The Marketplace is the successor of HACS in Home Assistant 2026.11.
 
-[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ColColonCleaner&repository=ha-lite-resources&category=integration)
-
-Or do these steps:
+Do each of these steps:
 
 1. Open **Settings → Marketplace**.
 2. Select **Add from link** in the upper-right corner.
@@ -107,12 +105,12 @@ Copy `custom_components/lite_resources` into your `config/custom_components/` fo
 
 ## Set up
 
-[![Open your Home Assistant instance and start setting up Lite Resources.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=lite_resources)
+Do each of these steps. The button is only a second way to do step 1.
 
-Or do these steps:
-
-1. Open **Settings → Devices & services**, and select **Add integration**.
-2. Search for **Lite Resources** and select it. The dialog has no settings, so select **Submit**.
+1. Open the dialog that adds the integration, in one of two ways:
+   - Open **Settings → Devices & services**, select **Add integration**, search for **Lite Resources**, and select it.
+   - Select this button: [![Open your Home Assistant instance and start setting up Lite Resources.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=lite_resources)
+2. The dialog has no settings, so select **Submit**. The dialog names the next step, and it does not show the steps of this list.
 3. Open the page of the integration: **Settings → Devices & services → Lite Resources**. The page shows the entry **Lite Resources**.
 4. Select **Add group**. It is in two places on that page: the button in the upper-right corner, and the three-dot menu (⋮) at the right of the entry **Lite Resources**.
 5. Fill in the form with the options of the table below, and select **Submit**. The group then shows as a row below the entry.

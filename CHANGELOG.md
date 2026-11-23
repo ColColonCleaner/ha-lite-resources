@@ -6,6 +6,7 @@
 
 - **The instructions say where each action is.** The README gives each step of the install and of the setup. **Add group** is the button in the upper-right corner of the page of the integration, and an item of the three-dot menu of the entry. The cog icon of a group changes it, and the three-dot menu of a group renames or deletes it. A picture shows that page.
 - The setup dialog and the dialog of a group name the same places.
+- The README no longer gives a button as a replacement of a list of steps. The setup button is a second way to do the first step only. The install section gives its steps with no button, because nobody checked that the button opens a repository that the catalog does not list.
 
 ## 0.3.2 - 2026-11-23
 
