@@ -22,11 +22,12 @@ class ReleaseMetadataTest(unittest.TestCase):
         for key in ("documentation", "issue_tracker", "codeowners"):
             self.assertTrue(manifest.get(key), key)
         self.assertEqual(
-            manifest["documentation"], "https://github.com/evski/ha-lite-resources"
+            manifest["documentation"],
+            "https://github.com/ColColonCleaner/ha-lite-resources",
         )
         self.assertEqual(
             manifest["issue_tracker"],
-            "https://github.com/evski/ha-lite-resources/issues",
+            "https://github.com/ColColonCleaner/ha-lite-resources/issues",
         )
 
     def test_hacs_manifest_has_name(self) -> None:

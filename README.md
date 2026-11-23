@@ -1,9 +1,11 @@
 # Lite Resources
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
-[![Release](https://img.shields.io/github/v/release/evski/ha-lite-resources)](https://github.com/evski/ha-lite-resources/releases)
-[![Validate](https://github.com/evski/ha-lite-resources/actions/workflows/validate.yaml/badge.svg)](https://github.com/evski/ha-lite-resources/actions/workflows/validate.yaml)
+[![Release](https://img.shields.io/github/v/release/ColColonCleaner/ha-lite-resources)](https://github.com/ColColonCleaner/ha-lite-resources/releases)
+[![Validate](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml/badge.svg)](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+This repository is a fork of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). It adds [groups](#groups) of light users, each with its own dashboards.
 
 **Make Home Assistant dashboards fast on wall panels, old tablets and other low-powered screens - without changing anything for your phones and computers.**
 
@@ -74,11 +76,15 @@ A change of a group, such as a new user or a new dashboard, reaches the open pan
 
 Lite Resources needs Home Assistant 2026.11 or later.
 
-### HACS (recommended)
+### Marketplace (recommended)
 
-[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=evski&repository=ha-lite-resources&category=integration)
+The Marketplace is the successor of HACS in Home Assistant 2026.11.
 
-Or: HACS → ⋮ → **Custom repositories** → add `https://github.com/evski/ha-lite-resources` as an **Integration**. Install **Lite Resources** and restart Home Assistant.
+[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ColColonCleaner&repository=ha-lite-resources&category=integration)
+
+Or: **Settings → Marketplace → Add from link**, and enter `https://github.com/ColColonCleaner/ha-lite-resources`. Then open the repository in the list, install **Lite Resources**, and restart Home Assistant.
+
+If the Marketplace holds `evski/ha-lite-resources`, uninstall that repository first. Both repositories install the same integration folder.
 
 ### Manual
 

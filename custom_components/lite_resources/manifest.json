@@ -1,13 +1,13 @@
 {
   "domain": "lite_resources",
   "name": "Lite Resources",
-  "codeowners": ["@evski"],
+  "codeowners": ["@ColColonCleaner"],
   "config_flow": true,
   "dependencies": ["lovelace"],
-  "documentation": "https://github.com/evski/ha-lite-resources",
+  "documentation": "https://github.com/ColColonCleaner/ha-lite-resources",
   "integration_type": "service",
   "iot_class": "calculated",
-  "issue_tracker": "https://github.com/evski/ha-lite-resources/issues",
+  "issue_tracker": "https://github.com/ColColonCleaner/ha-lite-resources/issues",
   "requirements": [],
   "single_config_entry": true,
   "version": "0.3.0"
