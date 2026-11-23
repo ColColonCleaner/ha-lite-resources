@@ -89,9 +89,17 @@ The Marketplace is the successor of HACS in Home Assistant 2026.11.
 
 [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ColColonCleaner&repository=ha-lite-resources&category=integration)
 
-Or: **Settings → Marketplace → Add from link**, and enter `https://github.com/ColColonCleaner/ha-lite-resources`. Then open the repository in the list, install **Lite Resources**, and restart Home Assistant.
+Or do these steps:
 
-If the Marketplace holds `evski/ha-lite-resources`, uninstall that repository first. Both repositories install the same integration folder.
+1. Open **Settings → Marketplace**.
+2. Select **Add from link** in the upper-right corner.
+3. Under **GitHub link**, enter `https://github.com/ColColonCleaner/ha-lite-resources`, and select **Add**. If the Marketplace asks you to connect GitHub, do that first.
+4. Select **Lite Resources** in the list to open its page. Select **Install**, and **Install** again in the dialog.
+5. Restart Home Assistant. A repair under **Settings → System → Repairs** asks for the restart and can do it.
+
+If the Marketplace holds `evski/ha-lite-resources`, uninstall that repository first, because both repositories install the same integration folder. Open the page of that repository in the Marketplace. Select the three-dot menu (⋮) in the upper-right corner, then **Uninstall**, then **Delete and uninstall**. That also deletes its setup.
+
+To update later, open the page of the repository in the Marketplace and install the new version, then restart Home Assistant.
 
 ### Manual
 
@@ -101,9 +109,20 @@ Copy `custom_components/lite_resources` into your `config/custom_components/` fo
 
 [![Open your Home Assistant instance and start setting up Lite Resources.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=lite_resources)
 
-Or **Settings → Devices & services → Add integration → Lite Resources**. This step has no settings.
+Or do these steps:
 
-Then open the integration and select **Add group**, one time for each set of panels. To change a group later, use its reconfigure button.
+1. Open **Settings → Devices & services**, and select **Add integration**.
+2. Search for **Lite Resources** and select it. The dialog has no settings, so select **Submit**.
+3. Open the page of the integration: **Settings → Devices & services → Lite Resources**. The page shows the entry **Lite Resources**.
+4. Select **Add group**. It is in two places on that page: the button in the upper-right corner, and the three-dot menu (⋮) at the right of the entry **Lite Resources**.
+5. Fill in the form with the options of the table below, and select **Submit**. The group then shows as a row below the entry.
+6. Do steps 4 and 5 again for each other set of panels.
+7. Reload the browser or the app of each panel.
+
+<p align="center">
+  <img src="docs/images/integration-page.png" width="720" alt="The page of the integration. Add group is the button in the upper-right corner and an item of the three-dot menu of the entry. Each group is a row with a cog icon.">
+  <br><em>The page of the integration with two groups. The three-dot menu of the entry is open.</em>
+</p>
 
 | Option | What to choose |
 |---|---|
@@ -116,15 +135,27 @@ Then open the integration and select **Add group**, one time for each set of pan
 | **Only send states their dashboards show** | Turn on for the biggest speed-up on slow devices. |
 | **Extra entities** | Entities to keep streaming even though they aren't on the dashboards. |
 
-Then reload the panel's browser/app.
+### Change, rename or delete a group
+
+Each group is a row below the entry **Lite Resources** on the page of the integration.
+
+- To change a group, select the cog icon (⚙) at the right of its row. The form of the group opens. Change the options, and select **Submit**.
+- To rename a group, select the three-dot menu (⋮) at the right of its row, then **Rename**. The field **Group name** of the form does the same.
+- To delete a group, select the three-dot menu (⋮) at the right of its row, then **Delete**. Its users then get the normal behaviour of Home Assistant.
+
+A change reaches the open panels at once. No reload of the integration and no restart is necessary.
 
 ### Update from 0.2.x
 
-The update moves the users and dashboards of a 0.2.x setup into one group named **Lite users**. Open that group with its reconfigure button and give it a name. Then add the other groups. 0.2.x does not read the new configuration, so a return to 0.2.x needs the integration removed and added again.
+The update moves the users and dashboards of a 0.2.x setup into one group named **Lite users**. On the page of the integration, select the cog icon (⚙) at the right of that group, and give it a name. Then add the other groups with **Add group**. 0.2.x does not read the new configuration, so a return to 0.2.x needs the integration removed and added again.
 
 ### Check what a panel gets
 
-**Developer tools → Actions → `lite_resources.preview`** lists each group with its users. For each group it shows the resources that its users get and skip, and any `custom:` card types with no local resource. With state filtering on, it also shows the entities that they receive.
+1. Open **Developer tools → Actions**.
+2. Enter `lite_resources.preview` in the field **Action**.
+3. Select **Perform action**. The response shows below the button.
+
+The response lists each group with its users. For each group it shows the resources that its users get and skip, and any `custom:` card types with no local resource. With state filtering on, it also shows the entities that they receive.
 
 ## FAQ
 

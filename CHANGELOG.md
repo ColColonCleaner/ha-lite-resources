@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-11-23
+
+- **The instructions say where each action is.** The README gives each step of the install and of the setup. **Add group** is the button in the upper-right corner of the page of the integration, and an item of the three-dot menu of the entry. The cog icon of a group changes it, and the three-dot menu of a group renames or deletes it. A picture shows that page.
+- The setup dialog and the dialog of a group name the same places.
+
 ## 0.3.2 - 2026-11-23
 
 - **A page that connects while Home Assistant starts gets each of its entities.** Many entities get their first state some seconds after the start. A page that connected before that time never received them, and its cards showed no camera or no value until the page connected again. The state subscription of a lite user now holds also the names of entities with no state yet, so each one arrives with its first state. The registry gives the domain and the device class of such an entity.

@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Lite Resources",
-        "description": "Set up Lite Resources. After this step, add one group for each set of users (for example the logins of the wall panels of one room) with **Add group** on the integration page. Each group has its own dashboards. Everyone outside the groups keeps the normal behaviour."
+        "description": "Set up Lite Resources. After this step, open the page of the integration: Settings, Devices & services, Lite Resources. There, select **Add group** in the upper-right corner, or in the three-dot menu of the entry. Add one group for each set of users (for example the logins of the wall panels of one room). Each group has its own dashboards. Everyone outside the groups keeps the normal behaviour."
       }
     },
     "abort": {
@@ -44,7 +44,7 @@
         },
         "reconfigure": {
           "title": "Change a group of lite users",
-          "description": "Open pages of the users of this group get the new entities at once. A page loads other custom cards when it is loaded again.",
+          "description": "Open pages of the users of this group get the new entities at once. A page loads other custom cards when it is loaded again. To rename or delete the group, use the three-dot menu at the right of its row on the page of the integration.",
           "data": {
             "name": "Group name",
             "users": "Lite users",
