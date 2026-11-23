@@ -67,6 +67,10 @@ def _forward_entity_changes(send_message, entity_ids, entity_filter, user, messa
     """Stand-in for the listener of Home Assistant with the same name and arguments."""
 
 
+# The search takes this function only from the module of Home Assistant that defines it.
+_forward_entity_changes.__module__ = "homeassistant.components.websocket_api.commands"
+
+
 def _core_subscribe(hass, connection, msg) -> None:
     """The subscribe_entities handler of Home Assistant, reduced to what the pages see.
 

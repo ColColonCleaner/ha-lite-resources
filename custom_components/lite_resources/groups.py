@@ -8,6 +8,7 @@ plain unit test.
 from __future__ import annotations
 
 import functools
+import logging
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -43,9 +44,12 @@ ENTITY_EVENT_REMOVE = "r"
 # The event of a state change, as homeassistant.const.EVENT_STATE_CHANGED defines it.
 EVENT_STATE_CHANGED = "state_changed"
 
-# The function of homeassistant.components.websocket_api.commands that forwards the state
-# changes of a subscribe_entities subscription to its page.
+# The function that forwards the state changes of a subscribe_entities subscription to its
+# page, and the module of Home Assistant that defines it.
 CORE_FORWARD_FUNCTION = "_forward_entity_changes"
+CORE_FORWARD_MODULE = "homeassistant.components.websocket_api.commands"
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -136,12 +140,13 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
 
     This reads internals of Home Assistant: the listener list of the event bus and that
     partial. An item of another layout is left out, so a later version of Home Assistant
-    with another layout gives an empty list.
+    with another layout gives an empty list. The read catches each exception, because the
+    layout of an internal can change in any way.
     """
     found: list[tuple[Any, int]] = []
     try:
         listeners = list(bus._listeners.get(EVENT_STATE_CHANGED, ()))
-    except AttributeError:
+    except Exception:  # an event bus of another layout
         return found
     for item in listeners:
         try:
@@ -149,6 +154,7 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
             if (
                 not isinstance(target, functools.partial)
                 or getattr(target.func, "__name__", None) != CORE_FORWARD_FUNCTION
+                or getattr(target.func, "__module__", None) != CORE_FORWARD_MODULE
             ):
                 continue
             send_message, entity_ids, entity_filter, _user, message_id = target.args[:5]
@@ -158,7 +164,7 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
             msg_id = int(message_id)
             if msg_id in connection.subscriptions:
                 found.append((connection, msg_id))
-        except (AttributeError, IndexError, TypeError, ValueError):
+        except Exception:  # a listener of another layout
             continue
     return found
 
@@ -236,11 +242,11 @@ class LiveSubscriptions:
             return False
         self._live.pop(key, None)
         getattr(ended, "inner", ended)()
-        quiet = _QuietConnection(live.connection)
         if wanted is None:
-            self._subscribe(quiet, dict(live.msg))
+            self._subscribe(_QuietConnection(live.connection), dict(live.msg))
             return True
-        self._subscribe(quiet, {**live.msg, "entity_ids": sorted(wanted)})
+        if not self._narrow(live.connection, live.msg, wanted):
+            return False
         removed = live.entities - wanted
         if removed:
             live.connection.send_message(
@@ -266,7 +272,7 @@ class LiveSubscriptions:
         before this integration is set up. `held` is each entity that the page can hold
         now. The page keeps its subscription ID. It receives the states of `entities`, and
         a removal for each other entity of `held`. Returns False when the page has no
-        subscription with this ID.
+        subscription with this ID, and when the narrowed subscription fails.
         """
         key = (id(connection), msg_id)
         ended = connection.subscriptions.pop(msg_id, None)
@@ -277,9 +283,8 @@ class LiveSubscriptions:
         ended()
         wanted = frozenset(entities)
         msg = {"id": msg_id, "type": WS_SUBSCRIBE_ENTITIES}
-        self._subscribe(
-            _QuietConnection(connection), {**msg, "entity_ids": sorted(wanted)}
-        )
+        if not self._narrow(connection, msg, wanted):
+            return False
         removed = frozenset(held) - wanted
         if removed:
             connection.send_message(
@@ -290,6 +295,33 @@ class LiveSubscriptions:
                 }
             )
         self._track(_Live(connection, msg, wanted))
+        return True
+
+    def _narrow(self, connection: Any, msg: dict[str, Any], wanted: frozenset[str]) -> bool:
+        """Start the narrowed subscription of a page whose earlier subscription ended.
+
+        Returns False when the handler fails. The page then gets a subscription to all
+        entities, so that it does not stay with no state stream.
+        """
+        quiet = _QuietConnection(connection)
+        try:
+            self._subscribe(quiet, {**msg, "entity_ids": sorted(wanted)})
+        except Exception:  # a page with no state stream shows old values
+            _LOGGER.exception(
+                "The narrowed state subscription failed; the page gets all states"
+            )
+            # The handler can fail after it put its listener on the event bus.
+            half_made = connection.subscriptions.pop(msg["id"], None)
+            if half_made is not None:
+                half_made()
+            try:
+                self._subscribe(quiet, dict(msg))
+            except Exception:  # the other pages still get their update
+                _LOGGER.exception(
+                    "The state subscription for all entities failed too; the page "
+                    "gets no state until it connects again"
+                )
+            return False
         return True
 
     def _track(self, live: _Live) -> None:

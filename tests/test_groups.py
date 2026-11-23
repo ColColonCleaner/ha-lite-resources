@@ -131,6 +131,9 @@ class _Core:
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        # True makes each call with an entity list fail. True in fail_all makes each call fail.
+        self.fail_narrowed = False
+        self.fail_all = False
 
     def subscribe(self, connection, msg) -> None:
         call = {"entity_ids": msg.get("entity_ids"), "ended": False}
@@ -140,6 +143,9 @@ class _Core:
             call["ended"] = True
 
         connection.subscriptions[msg["id"]] = end
+        if self.fail_all or (self.fail_narrowed and msg.get("entity_ids") is not None):
+            # The failure comes after the listener is in place, which is the worst case.
+            raise RuntimeError("the handler failed")
         connection.send_result(msg["id"])
         connection.send_message(
             {"id": msg["id"], "type": "event", "event": {"a": msg.get("entity_ids")}}
@@ -218,6 +224,21 @@ class LiveSubscriptionsTest(unittest.TestCase):
         self.assertEqual(len(self.live), 0)
         self.assertEqual(len(self.core.calls), 1)
 
+    def test_failed_narrowing_of_a_new_set_gives_the_page_all_states(self) -> None:
+        item = self.live.items()[0]
+        self.core.fail_narrowed = True
+        with self.assertLogs(_groups._LOGGER, level="ERROR"):
+            self.assertFalse(self.live.update(item, {"sensor.a"}))
+        # The old listener ended, the failed one ended, and the last one holds all entities.
+        self.assertTrue(self.core.calls[0]["ended"])
+        self.assertTrue(self.core.calls[1]["ended"])
+        self.assertIsNone(self.core.calls[2]["entity_ids"])
+        self.assertFalse(self.core.calls[2]["ended"])
+        self.assertIn(5, self.connection.subscriptions)
+        self.assertEqual(len(self.live), 0)
+        # The page keeps each entity: it gets no removal.
+        self.assertFalse(any("r" in message["event"] for message in self.connection.messages))
+
     def test_two_pages_of_one_connection_are_kept_apart(self) -> None:
         self.live.start(self.connection, {"id": 9, "type": "subscribe_entities"}, {"light.k"})
         self.assertEqual(len(self.live), 2)
@@ -230,6 +251,10 @@ class LiveSubscriptionsTest(unittest.TestCase):
 
 def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
     """Stand-in for the listener of Home Assistant with the same name and arguments."""
+
+
+# The search takes this function only from the module of Home Assistant that defines it.
+_forward_entity_changes.__module__ = _groups.CORE_FORWARD_MODULE
 
 
 def _other_listener(event):
@@ -266,7 +291,15 @@ class UnfilteredSubscriptionsTest(unittest.TestCase):
         plain = (SimpleNamespace(target=_other_listener), None)
         other = _job(self.page, 5, func=_other_listener)
         broken = ("not a job",)
-        self.assertEqual(self._found(plain, other, broken), [])
+        # An item that raises an error of another kind at the read.
+        odd: dict = {}
+        self.assertEqual(self._found(plain, other, broken, odd), [])
+
+    def test_function_of_the_same_name_in_another_module_is_left_out(self) -> None:
+        def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
+            """A copy of the listener of Home Assistant in another integration."""
+
+        self.assertEqual(self._found(_job(self.page, 5, func=_forward_entity_changes)), [])
 
     def test_subscription_that_the_page_ended_is_left_out(self) -> None:
         self.assertEqual(self._found(_job(self.page, 9)), [])
@@ -311,6 +344,29 @@ class AdoptTest(unittest.TestCase):
         item = self.live.items()[0]
         self.assertTrue(self.live.update(item, {"sensor.a", "sensor.c"}))
         self.assertEqual(self.core.calls[-1]["entity_ids"], ["sensor.a", "sensor.c"])
+
+    def test_failed_narrowing_gives_the_page_all_states_again(self) -> None:
+        self.core.fail_narrowed = True
+        with self.assertLogs(_groups._LOGGER, level="ERROR"):
+            self.assertFalse(
+                self.live.adopt(self.connection, 5, ["sensor.a", "sensor.x"], {"sensor.a"})
+            )
+        # The first listener ended, the failed one ended, and the last one holds all entities.
+        self.assertTrue(self.core.calls[0]["ended"])
+        self.assertTrue(self.core.calls[1]["ended"])
+        self.assertIsNone(self.core.calls[2]["entity_ids"])
+        self.assertFalse(self.core.calls[2]["ended"])
+        self.assertIn(5, self.connection.subscriptions)
+        self.assertEqual(len(self.live), 0)
+        # The page keeps each entity: it gets no removal.
+        self.assertFalse(any("r" in message["event"] for message in self.connection.messages))
+
+    def test_handler_that_fails_each_call_raises_nothing(self) -> None:
+        self.core.fail_all = True
+        with self.assertLogs(_groups._LOGGER, level="ERROR") as logs:
+            self.assertFalse(self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a"}))
+        self.assertEqual(len(logs.records), 2)
+        self.assertEqual(len(self.live), 0)
 
     def test_missing_subscription_is_not_adopted(self) -> None:
         self.assertFalse(self.live.adopt(self.connection, 9, ["sensor.a"], {"sensor.a"}))
