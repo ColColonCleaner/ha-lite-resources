@@ -1,0 +1,2 @@
+# Python bytecode, which each test run writes again.
+__pycache__/
