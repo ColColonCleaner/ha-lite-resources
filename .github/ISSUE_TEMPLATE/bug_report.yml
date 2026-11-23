@@ -1,5 +1,5 @@
 name: Bug report
-description: Something doesn't load or update on a light device
+description: Something doesn't load or update on a low-powered device
 labels: [bug]
 body:
   - type: input

@@ -161,7 +161,8 @@ class _Dashboard:
 
 def _entry(entity_id, **more) -> SimpleNamespace:
     values = {"area_id": None, "device_id": None, "platform": "test", "disabled": False,
-              "hidden": False, "entity_category": None}
+              "hidden": False, "entity_category": None, "device_class": None,
+              "original_device_class": None}
     values.update(more)
     return SimpleNamespace(entity_id=entity_id, **values)
 
@@ -260,9 +261,61 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_dashboard_without_such_cards_needs_no_registry(self) -> None:
-        del self.hass.entity_registry
+    async def test_dashboard_without_such_cards_adds_nothing(self) -> None:
         found = await _resolver.async_dashboard_entities(self.hass, {"dashboards": ["plain"]})
+        self.assertEqual(found, {"sun.sun", "lock.side_door"})
+
+
+class StartupTest(unittest.IsolatedAsyncioTestCase):
+    """A page that connects while Home Assistant starts.
+
+    The registries are complete at that time, and many entities have no state yet. The
+    cameras of one home got their first state 27 seconds after the start, later than the
+    page of a tablet connected.
+    """
+
+    async def asyncSetUp(self) -> None:
+        entries = [
+            _entry("lock.side_door", area_id="side_door"),
+            # No camera has a state yet, so the state machine does not hold the domain.
+            _entry("camera.side_door", area_id="side_door"),
+            # The device class of an entity with no state comes from the registry.
+            _entry("binary_sensor.doorbell_side_motion", area_id="side_door",
+                   original_device_class="motion"),
+            _entry("binary_sensor.side_door_open", area_id="side_door",
+                   original_device_class="door"),
+            _entry("light.side_door", area_id="side_door"),
+        ]
+        dashboard = {"views": [{"cards": [
+            CAMERA_CARD,
+            {"type": "tile", "entity": "lock.side_door"},
+            {"type": "picture-entity", "entity": "camera.side_door"},
+        ]}]}
+        self.hass = SimpleNamespace(
+            data={"lovelace": SimpleNamespace(dashboards={"kitchen": _Dashboard(dashboard)})},
+            states=_States({"lock.side_door": {}, "sun.sun": {}}),
+            entity_registry=SimpleNamespace(entities={entry.entity_id: entry for entry in entries}),
+            device_registry=SimpleNamespace(async_get={}.get),
+            area_registry=SimpleNamespace(
+                async_get_area=lambda area_id: SimpleNamespace(
+                    temperature_entity_id=None, humidity_entity_id=None
+                )
+            ),
+        )
+
+    async def test_subscription_holds_the_entities_with_no_state_yet(self) -> None:
+        found = await _resolver.async_dashboard_entities(
+            self.hass, {"dashboards": ["kitchen"]}, include_missing=True
+        )
+        # Named by a card, in a domain that has no state yet.
+        self.assertIn("camera.side_door", found)
+        # Found by the area card: the device class comes from the registry.
+        self.assertIn("binary_sensor.doorbell_side_motion", found)
+        self.assertIn("light.side_door", found)
+        self.assertNotIn("binary_sensor.side_door_open", found)
+
+    async def test_list_of_the_entities_holds_only_those_with_a_state(self) -> None:
+        found = await _resolver.async_dashboard_entities(self.hass, {"dashboards": ["kitchen"]})
         self.assertEqual(found, {"sun.sun", "lock.side_door"})
 
 

@@ -280,7 +280,7 @@ async def _async_dashboard_text(hass: HomeAssistant, key: str) -> str | None:
 
 
 async def async_dashboard_entities(
-    hass: HomeAssistant, options: dict[str, Any]
+    hass: HomeAssistant, options: dict[str, Any], include_missing: bool = False
 ) -> set[str]:
     """Return every entity the configured dashboards can show.
 
@@ -288,8 +288,16 @@ async def async_dashboard_entities(
     conditions, actions), the entities that a card finds by itself (the area card, and a
     card of CARD_PLATFORMS), the members of any groups among them, the configured extras,
     and a few the frontend uses itself.
+
+    `include_missing` keeps each name that has no state now. A state subscription needs
+    those names: the stream sends only the entities of its list, and an entity can get
+    its first state after a page connects, for example while Home Assistant starts.
     """
-    domains = {state.domain for state in hass.states.async_all()}
+    entities = registry_entities(hass)
+    # The registry holds the domain of an entity before the entity has a state.
+    domains = {state.domain for state in hass.states.async_all()} | {
+        entity.domain for entity in entities
+    }
     if not domains:
         return set()
     pattern = re.compile(
@@ -308,19 +316,17 @@ async def async_dashboard_entities(
         found.update(pattern.findall(text))
         cards.extend(area_cards(config))
         platforms |= card_platforms(_CUSTOM_TYPE.findall(text))
-    # The attribute that names the members of an entity, for an entity of an integration
-    # with an attribute of its own.
-    member_attribute: dict[str, str] = {}
     if cards or platforms:
         # The entities that a card finds in the registries, which the text does not name.
-        entities = registry_entities(hass)
         found |= discovered_entities(cards, platforms, entities)
         found |= area_sensor_entities(hass, cards)
-        member_attribute = {
-            entity.entity_id: MEMBER_ATTRIBUTES[entity.platform]
-            for entity in entities
-            if entity.platform in MEMBER_ATTRIBUTES
-        }
+    # The attribute that names the members of an entity, for an entity of an integration
+    # with an attribute of its own.
+    member_attribute = {
+        entity.entity_id: MEMBER_ATTRIBUTES[entity.platform]
+        for entity in entities
+        if entity.platform in MEMBER_ATTRIBUTES
+    }
     # add group members (light groups, old-style groups, ...), recursively
     todo = list(found)
     while todo:
@@ -335,6 +341,8 @@ async def async_dashboard_entities(
                     if isinstance(member, str) and member not in found:
                         found.add(member)
                         todo.append(member)
+    if include_missing:
+        return found
     return {e for e in found if hass.states.get(e) is not None}
 
 

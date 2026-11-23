@@ -1,4 +1,4 @@
-"""The integration set up with two groups of light users.
+"""The integration set up with two groups of lite users.
 
 The workshop kiosks show one dashboard and the kitchen tablet shows another. Each user gets
 the resources and the states of the dashboards of its own group, and an open page follows a
@@ -29,8 +29,9 @@ USERS = {
 }
 
 
-async def _dashboard_entities(hass, options) -> set[str]:
+async def _dashboard_entities(hass, options, include_missing=False) -> set[str]:
     """Stand-in for resolver.async_dashboard_entities."""
+    hass.include_missing.append(include_missing)
     found = set(options.get("extra_entities", []))
     for key in options["dashboards"]:
         found |= hass.dashboard_entities[key]
@@ -92,6 +93,16 @@ class _Bus:
         self.listeners.setdefault(event_type, []).append(listener)
         return lambda: self.listeners[event_type].remove(listener)
 
+    def async_listen_once(self, event_type, listener):
+        """The listener leaves the bus before it runs, as in Home Assistant."""
+
+        def once(event) -> None:
+            self.listeners[event_type].remove(once)
+            listener(event)
+
+        self.listeners.setdefault(event_type, []).append(once)
+        return lambda: self.listeners[event_type].remove(once)
+
     def fire(self, event_type, data) -> None:
         for listener in list(self.listeners.get(event_type, [])):
             listener(Event(data))
@@ -126,7 +137,9 @@ class _Auth:
 
 
 class _Hass:
-    def __init__(self) -> None:
+    def __init__(self, is_running: bool = True) -> None:
+        self.is_running = is_running
+        self.include_missing: list[bool] = []
         self.data = {
             "websocket_api": {
                 "lovelace/resources": (_core_resources, "resources schema"),
@@ -364,6 +377,63 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entry.update_listeners, [])
 
 
+class StartupTest(unittest.IsolatedAsyncioTestCase):
+    """A page that connects while Home Assistant starts gets its full set after the start."""
+
+    async def asyncSetUp(self) -> None:
+        self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
+        _entry.async_dashboard_entities = _dashboard_entities
+        _entry.async_resolve = _resolve
+
+    async def asyncTearDown(self) -> None:
+        _entry.async_dashboard_entities, _entry.async_resolve = self._saved
+
+    async def _setup(self, is_running: bool):
+        hass = _Hass(is_running=is_running)
+        entry = _Entry(subentries=[_group("Kitchen tablet", ["u-k"], ["main-dashboard"])])
+        await _entry.async_setup_entry(hass, entry)
+        return hass, entry
+
+    async def test_page_is_updated_when_the_start_is_complete(self) -> None:
+        hass, entry = await self._setup(is_running=False)
+        connection = _Connection("u-k")
+        handler, _schema = hass.data["websocket_api"]["subscribe_entities"]
+        handler(hass, connection, {"id": 5, "type": "subscribe_entities"})
+        await hass.drain()
+        # A group entity got its state after the page connected, so it has a member now.
+        hass.dashboard_entities["main-dashboard"] = {"light.k", "sensor.b", "light.k_member"}
+        hass.bus.fire("homeassistant_started", {})
+        await hass.drain()
+        calls = [c for c in hass.core_subscriptions if c["user"] == "u-k"]
+        self.assertEqual(calls[-1]["entity_ids"], ["light.k", "light.k_member", "sensor.b"])
+        self.assertEqual(connection.results, [(5, None)])
+        # The listener ran once. The unload does not remove it a second time.
+        self.assertEqual(hass.bus.listeners["homeassistant_started"], [])
+        for func in entry.unload:
+            func()
+
+    async def test_unload_before_the_start_removes_the_listener(self) -> None:
+        hass, entry = await self._setup(is_running=False)
+        self.assertEqual(len(hass.bus.listeners["homeassistant_started"]), 1)
+        for func in entry.unload:
+            func()
+        self.assertEqual(hass.bus.listeners["homeassistant_started"], [])
+
+    async def test_running_home_assistant_needs_no_listener(self) -> None:
+        hass, _unused = await self._setup(is_running=True)
+        self.assertNotIn("homeassistant_started", hass.bus.listeners)
+
+    async def test_subscription_asks_for_the_entities_with_no_state_yet(self) -> None:
+        hass, _unused = await self._setup(is_running=True)
+        handler, _schema = hass.data["websocket_api"]["subscribe_entities"]
+        handler(hass, _Connection("u-k"), {"id": 5, "type": "subscribe_entities"})
+        await hass.drain()
+        self.assertEqual(hass.include_missing, [True])
+        # The preview lists the entities that have a state.
+        await hass.services.registered[("lite_resources", "preview")](None)
+        self.assertEqual(hass.include_missing, [True, False])
+
+
 class SetupWithoutLovelaceTest(unittest.IsolatedAsyncioTestCase):
     """Home Assistant tries the setup again when the dashboards are not set up yet."""
 
@@ -393,7 +463,7 @@ class MigrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry.options, {})
         (group,) = entry.subentries.values()
         self.assertEqual(group.subentry_type, "group")
-        self.assertEqual(group.title, "Light users")
+        self.assertEqual(group.title, "Lite users")
         self.assertEqual(dict(group.data), options)
 
     async def test_setup_without_users_gets_no_group(self) -> None:

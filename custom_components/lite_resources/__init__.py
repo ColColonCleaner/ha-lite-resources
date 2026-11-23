@@ -1,6 +1,6 @@
-"""Lite Resources: make wall panels and other light devices do less work.
+"""Lite Resources: make wall panels and other low-powered devices do less work.
 
-Light users are set up in groups (for example the logins of the wall panels of one room).
+Lite users are set up in groups (for example the logins of the wall panels of one room).
 For the users of a group:
 - Resources: Home Assistant's frontend fetches the full list of dashboard resources (custom
   cards and mods) with the "lovelace/resources" websocket command and loads all of them. This
@@ -22,6 +22,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import (
     Event,
     HomeAssistant,
@@ -54,7 +55,7 @@ from .resolver import FileCache, async_dashboard_entities, async_resolve
 _LOGGER = logging.getLogger(__name__)
 
 # The title of the group that the migration makes from the options of a single-group version.
-MIGRATED_GROUP_TITLE = "Light users"
+MIGRATED_GROUP_TITLE = "Lite users"
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -72,7 +73,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ),
             )
         hass.config_entries.async_update_entry(entry, options={}, version=2)
-        _LOGGER.info("Migrated the configuration to groups of light users")
+        _LOGGER.info("Migrated the configuration to groups of lite users")
     return True
 
 
@@ -96,9 +97,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return group_for_user(groups(), user.id if user is not None else None)
 
     async def entities_of(group: Group) -> set[str]:
-        """Return the entities of the dashboards of a group. Empty when that fails."""
+        """Return the entities for the state subscription of a group. Empty when that fails.
+
+        The set holds also each name with no state now, so that a page gets an entity
+        whose first state comes after the page connected.
+        """
         try:
-            return await async_dashboard_entities(hass, dict(group.options))
+            return await async_dashboard_entities(
+                hass, dict(group.options), include_missing=True
+            )
         except Exception:
             _LOGGER.exception(
                 "Working out the entities of group %s failed; sending all states",
@@ -184,7 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     async def refresh_live(only: set[str] | None = None) -> None:
-        """Give each open page of a light user the entity set of its group as it is now.
+        """Give each open page of a lite user the entity set of its group as it is now.
 
         `only` limits the work to the pages of the groups with these IDs.
         """
@@ -226,6 +233,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """A group was added, changed or removed: update the open pages."""
         await refresh_live()
 
+    # The function that removes the listener for the end of the start, while it waits.
+    cancel_started: list[Any] = []
+
+    @callback
+    def started(event: Event) -> None:
+        """The start of Home Assistant is complete: update the pages that connected before.
+
+        Each integration had its chance to load, so a group entity now names its members.
+        """
+        cancel_started.clear()
+        if len(live):
+            hass.async_create_task(refresh_live())
+
+    if not hass.is_running:
+        cancel_started.append(
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, started)
+        )
+
     async def preview(call: ServiceCall) -> ServiceResponse:
         response: list[dict[str, Any]] = []
         for group in groups():
@@ -258,6 +283,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         commands[WS_RESOURCES] = (original_handler, original_schema)
         commands[WS_SUBSCRIBE_ENTITIES] = (sub_handler, sub_schema)
         hass.services.async_remove(DOMAIN, SERVICE_PREVIEW)
+        while cancel_started:
+            cancel_started.pop()()
 
     entry.async_on_unload(restore)
     entry.async_on_unload(hass.bus.async_listen(EVENT_LOVELACE_UPDATED, dashboard_updated))

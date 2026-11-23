@@ -12,18 +12,18 @@
   },
   "config_subentries": {
     "group": {
-      "entry_type": "Group of light users",
+      "entry_type": "Group of lite users",
       "initiate_flow": {
         "user": "Add group",
         "reconfigure": "Change group"
       },
       "step": {
         "user": {
-          "title": "Add a group of light users",
+          "title": "Add a group of lite users",
           "description": "The users of a group load only the custom cards their dashboards use, and can receive live updates only for the entities on those dashboards. Both are worked out from the dashboards, and follow a dashboard when it is changed.",
           "data": {
             "name": "Group name",
-            "users": "Light users",
+            "users": "Lite users",
             "dashboards": "Their dashboards",
             "filter_states": "Only send states their dashboards show",
             "extra_entities": "Extra entities",
@@ -43,11 +43,11 @@
           }
         },
         "reconfigure": {
-          "title": "Change a group of light users",
+          "title": "Change a group of lite users",
           "description": "Open pages of the users of this group get the new entities at once. A page loads other custom cards when it is loaded again.",
           "data": {
             "name": "Group name",
-            "users": "Light users",
+            "users": "Lite users",
             "dashboards": "Their dashboards",
             "filter_states": "Only send states their dashboards show",
             "extra_entities": "Extra entities",

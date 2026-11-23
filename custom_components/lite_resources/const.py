@@ -2,7 +2,7 @@
 
 DOMAIN = "lite_resources"
 
-# Each group of light users is a config subentry of this type. Its title is the group name.
+# Each group of lite users is a config subentry of this type. Its title is the group name.
 SUBENTRY_GROUP = "group"
 CONF_NAME = "name"
 

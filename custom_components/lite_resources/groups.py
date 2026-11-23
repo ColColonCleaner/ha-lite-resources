@@ -1,4 +1,4 @@
-"""Groups of light users, and the live state subscriptions of their open pages.
+"""Groups of lite users, and the live state subscriptions of their open pages.
 
 A group has a name, its users, its dashboards and its options. A user belongs to at most
 one group. This module imports nothing from Home Assistant, so that its logic runs in a
@@ -41,7 +41,7 @@ ENTITY_EVENT_REMOVE = "r"
 
 @dataclass(frozen=True)
 class Group:
-    """One group of light users."""
+    """One group of lite users."""
 
     group_id: str
     name: str

@@ -1,4 +1,4 @@
-"""Resource matching for the dashboards a light user actually opens.
+"""Resource matching for the dashboards a lite user actually opens.
 
 The cases come from a wall panel that loaded two unused card files and
 skipped Mushroom, which its dashboards do use. Card types are nested the
@@ -313,7 +313,7 @@ class NamesInJavascriptTest(unittest.TestCase):
 
 
 class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
-    """Which resource URLs a light user is sent."""
+    """Which resource URLs a lite user is sent."""
 
     async def asyncSetUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

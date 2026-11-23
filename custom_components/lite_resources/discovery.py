@@ -163,7 +163,8 @@ def registry_entities(hass: Any) -> list[RegistryEntity]:
 
     The area is that of the entity, or else the effective area of its device: a child
     device with no area of its own has the area of its parent device. The device class is
-    the attribute of the state, which is the value that the frontend filters on.
+    the attribute of the state, which is the value that the frontend filters on. An entity
+    with no state yet takes the device class of the registry.
     """
     from homeassistant.helpers import device_registry as dr, entity_registry as er
 
@@ -178,6 +179,10 @@ def registry_entities(hass: Any) -> list[RegistryEntity]:
             if device is not None:
                 area_id = dr.async_get_effective_area_id(hass, device)
         state = hass.states.get(entry.entity_id)
+        if state is not None:
+            device_class = state.attributes.get("device_class")
+        else:
+            device_class = entry.device_class or entry.original_device_class
         category = entry.entity_category
         result.append(
             RegistryEntity(
@@ -186,7 +191,7 @@ def registry_entities(hass: Any) -> list[RegistryEntity]:
                 platform=entry.platform,
                 hidden=entry.hidden,
                 category=str(getattr(category, "value", category)) if category else None,
-                device_class=state.attributes.get("device_class") if state else None,
+                device_class=device_class,
             )
         )
     return result

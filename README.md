@@ -5,7 +5,7 @@
 [![Validate](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml/badge.svg)](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This repository is a fork of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). It adds [groups](#groups) of light users, each with its own dashboards.
+This repository is a fork of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). It adds [groups](#groups) of lite users, each with its own dashboards.
 
 **Make Home Assistant dashboards fast on wall panels, old tablets and other low-powered screens - without changing anything for your phones and computers.**
 
@@ -49,15 +49,15 @@ If you use [View Assist](https://github.com/dinki/View-Assist) with the **View A
 
 Nothing is changed on disk and nothing is patched in the frontend. Lite Resources answers two of the frontend's own requests differently for the users you choose:
 
-1. **Resources** - the frontend asks once per page load for the list of dashboard resources (`lovelace/resources`). Light users get only the resources their dashboards use. Lite Resources reads every dashboard you select (including one nothing links to), collects every `custom:` card type in that config (stacks, sections, conditional cards, pop-ups and features), and finds which resource files register them. A bundle that builds its element names in code is recognised too (`mushroom.js` provides `custom:mushroom-*-card`). A file is matched by its whole name, so `dreame-vacuum-card.js` is not treated as the Mushroom vacuum card and `lock-manager.js` is not treated as the Mushroom lock card. Mods with no card type are detected from dashboard keys (`card_mod` → card-mod, `kiosk_mode` → kiosk-mode).
-2. **States** (optional) - the frontend subscribes to every entity's state (`subscribe_entities`). Light users' subscription is narrowed to the entities that appear anywhere in their dashboards (cards, pop-ups, conditions, actions), plus members of any groups, plus anything you add yourself.
+1. **Resources** - the frontend asks once per page load for the list of dashboard resources (`lovelace/resources`). Lite users get only the resources their dashboards use. Lite Resources reads every dashboard you select (including one nothing links to), collects every `custom:` card type in that config (stacks, sections, conditional cards, pop-ups and features), and finds which resource files register them. A bundle that builds its element names in code is recognised too (`mushroom.js` provides `custom:mushroom-*-card`). A file is matched by its whole name, so `dreame-vacuum-card.js` is not treated as the Mushroom vacuum card and `lock-manager.js` is not treated as the Mushroom lock card. Mods with no card type are detected from dashboard keys (`card_mod` → card-mod, `kiosk_mode` → kiosk-mode).
+2. **States** (optional) - the frontend subscribes to every entity's state (`subscribe_entities`). Lite users' subscription is narrowed to the entities that appear anywhere in their dashboards (cards, pop-ups, conditions, actions), plus members of any groups, plus anything you add yourself.
 
 One more need has no card type. A camera of the Advanced Camera Card with `live_provider: webrtc-card` needs the script of the WebRTC Camera integration. Lite Resources keeps that script when a dashboard holds this value.
 
 Some cards name no entity, and find their entities by themselves. Lite Resources sends those entities too:
 
-- The **area card** shows the camera, the sensors, the alerts and the controls of its area. Light users get the entities of that area that the card can show.
-- The **scheduler card** shows the schedules of the scheduler integration. Light users get each schedule, and the entities that it controls.
+- The **area card** shows the camera, the sensors, the alerts and the controls of its area. Lite users get the entities of that area that the card can show.
+- The **scheduler card** shows the schedules of the scheduler integration. Lite users get each schedule, and the entities that it controls.
 
 For another card of this kind, add its entities under *Extra entities*.
 
@@ -108,7 +108,7 @@ Then open the integration and select **Add group**, one time for each set of pan
 | Option | What to choose |
 |---|---|
 | **Group name** | A name for the set of panels, such as *Workshop kiosks*. |
-| **Light users** | The user(s) your panels log in as. Give each panel its own Home Assistant user if it doesn't have one. |
+| **Lite users** | The user(s) your panels log in as. Give each panel its own Home Assistant user if it doesn't have one. |
 | **Their dashboards** | Every dashboard those users open. |
 | **Always include** | Optional. Leave it empty, because the resources come from the dashboards. Add a resource only if a card fails to load (e.g. a mod your theme relies on). |
 | **Always exclude** | Resources to never load, even if a card seems to need them. Use this for an integration script with a generic name, such as `/dreame_vacuum/frontend.js`, that these dashboards don't use. It wins over *Always include*. |
@@ -120,7 +120,7 @@ Then reload the panel's browser/app.
 
 ### Update from 0.2.x
 
-The update moves the users and dashboards of a 0.2.x setup into one group named **Light users**. Open that group with its reconfigure button and give it a name. Then add the other groups. 0.2.x does not read the new configuration, so a return to 0.2.x needs the integration removed and added again.
+The update moves the users and dashboards of a 0.2.x setup into one group named **Lite users**. Open that group with its reconfigure button and give it a name. Then add the other groups. 0.2.x does not read the new configuration, so a return to 0.2.x needs the integration removed and added again.
 
 ### Check what a panel gets
 
@@ -132,7 +132,7 @@ The update moves the users and dashboards of a 0.2.x setup into one group named 
 Home Assistant's frontend is designed so any screen can show anything instantly - search, more-info dialogs and templates can reach every entity without asking first. That's the right default for phones and desktops. Lite Resources is an opt-in trade-off for screens that only ever show one dashboard.
 
 **Does it filter per device or per user?**
-Per user. If you log in as a light user on your phone, you get the light behaviour there too - so give panels their own user.
+Per user. If you log in as a lite user on your phone, you get the lite behaviour there too - so give panels their own user.
 
 **Can two sets of panels have different dashboards?**
 Yes. Add one group for each set. Each group gets the resources and the states of its own dashboards.
@@ -141,7 +141,7 @@ Yes. Add one group for each set. Each group gets the resources and the states of
 With state filtering on, entities not on the panel's dashboards aren't sent - add them under *Extra entities*, or add the dashboard. For a card that fails to load, run `lite_resources.preview` and add its resource under *Always include*. To stop a resource the panel never uses, add it under *Always exclude*.
 
 **Does it affect voice assistants, automations, history or the companion app's sensors?**
-No. Only the dashboard's resource list and its live state subscription are changed, and only for light users.
+No. Only the dashboard's resource list and its live state subscription are changed, and only for lite users.
 
 **What happens if something goes wrong?**
 If working out the trimmed list fails for any reason, the full list is sent and an error is logged - a panel is never left without its cards.

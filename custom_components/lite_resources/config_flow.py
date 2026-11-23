@@ -1,4 +1,4 @@
-"""Config flow for Lite Resources, and the subentry flow for its groups of light users."""
+"""Config flow for Lite Resources, and the subentry flow for its groups of lite users."""
 
 from __future__ import annotations
 
@@ -116,12 +116,12 @@ class LiteResourcesConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_supported_subentry_types(
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        """Return the subentry types: one subentry for each group of light users."""
+        """Return the subentry types: one subentry for each group of lite users."""
         return {SUBENTRY_GROUP: GroupSubentryFlow}
 
 
 class GroupSubentryFlow(ConfigSubentryFlow):
-    """Add or change one group of light users."""
+    """Add or change one group of lite users."""
 
     def _errors(self, user_input: dict[str, Any], group_id: str | None) -> dict[str, str]:
         """Return the form errors of the input for the group with this ID (None: a new one)."""

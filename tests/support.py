@@ -137,6 +137,12 @@ def install_homeassistant_stubs() -> None:
 
         exceptions.ConfigEntryNotReady = ConfigEntryNotReady
 
+    _default(
+        _module("homeassistant.const"),
+        "EVENT_HOMEASSISTANT_STARTED",
+        "homeassistant_started",
+    )
+
     core = _module("homeassistant.core")
     _default(core, "HomeAssistant", object)
     _default(core, "Event", Event)

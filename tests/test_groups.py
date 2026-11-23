@@ -1,4 +1,4 @@
-"""Groups of light users, and the narrowed state subscriptions of their open pages.
+"""Groups of lite users, and the narrowed state subscriptions of their open pages.
 
 The cases come from two sets of panels in one home: the kiosks of a workshop, which show
 one dashboard, and a kitchen tablet, which shows another.
