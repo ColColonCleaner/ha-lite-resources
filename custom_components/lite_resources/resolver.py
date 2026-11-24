@@ -691,6 +691,8 @@ async def async_resolve(
     refused: set[str] = set()
     # The readable files that provide no needed type, each with its path.
     unmatched: list[tuple[dict[str, Any], str, frozenset[str]]] = []
+    # The names that a file registers. None for a file that the scan cannot read.
+    names: frozenset[str] | None
     for item in await async_all_resources(hass):
         url = item.get("url", "")
         if resource_key(url) in excluded_keys:
@@ -712,7 +714,7 @@ async def async_resolve(
         stem_types = types_for_stem(stem, needed)
         path = url_to_path(hass, url)
         names = await hass.async_add_executor_job(cache.names, path) if path else None
-        if names is None:
+        if not path or names is None:
             # Served by an integration, missing, or remote: contents can't be
             # checked. Keep it unless the file name is a card that isn't used.
             provided |= stem_types

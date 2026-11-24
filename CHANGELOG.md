@@ -38,6 +38,7 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 - `tests/test_resolver.py` failed when it ran by itself, because its own stand-ins lacked one name. It now uses the shared stand-ins.
 - **The repository has static checks.** `ruff.toml` sets up ruff with its default rule set, and the Validate workflow has a new job `lint` that runs `ruff check .` with ruff 0.17.5. The first run found no fault in behaviour. It found import blocks out of order, five broad `except` lines that are there on purpose and now say so, and some small points of style. All are corrected, and the import order of the tests now equals that of the integration.
 - **The code has the format of `ruff format`**, which the development checklist of Home Assistant asks for. The run changed line breaks in 16 of the 18 Python files. The syntax tree and each comment of each file are the same before and after it. The job `lint` checks the format also.
+- **The integration has type checks.** `mypy.ini` sets up mypy 2.4.1 in its strict mode for the integration, and the job `lint` runs it. The checks run with no Home Assistant installation, so each name from Home Assistant has the type `Any`, and three strict checks that cannot pass with such names are off. The first run gave 18 findings. 15 came from those names. Two showed that mypy took a second read of the unload flag after a wait for dead code, so the code now reads the flag through a function. One was a variable with a type that was too wide in the resource scan. No finding was a fault in behaviour.
 
 ### Texts
 

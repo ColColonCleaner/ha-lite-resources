@@ -146,7 +146,9 @@ async def _async_group_schema(
     )
 
 
-class LiteResourcesConfigFlow(ConfigFlow, domain=DOMAIN):
+# The type checks run with no Home Assistant installation, so mypy does not know that
+# ConfigFlow takes the keyword "domain".
+class LiteResourcesConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Set up Lite Resources (single instance). The groups are added afterwards."""
 
     VERSION = 2

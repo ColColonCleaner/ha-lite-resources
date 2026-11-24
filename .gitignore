@@ -1,2 +1,5 @@
 # Python bytecode, which each test run writes again.
 __pycache__/
+# The caches of ruff and of mypy, which each run of the checks writes again.
+.ruff_cache/
+.mypy_cache/

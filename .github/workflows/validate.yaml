@@ -39,3 +39,7 @@ jobs:
       - run: .venv/bin/python -m ruff check .
       # The code has the format of the same ruff version.
       - run: .venv/bin/python -m ruff format --check .
+      # The type checks of mypy.ini. The integration imports voluptuous, so mypy reads its
+      # types. Home Assistant is not installed, as mypy.ini says.
+      - run: .venv/bin/python -m pip install mypy==2.4.1 voluptuous==0.16.0
+      - run: .venv/bin/python -m mypy

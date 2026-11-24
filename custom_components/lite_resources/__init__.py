@@ -121,6 +121,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # waits at that time must change no page, and the handlers from this setup pass each
     # message on.
     setup_state = {"unloaded": False}
+
+    def unloaded() -> bool:
+        """True after this setup's unload. The value can change during each wait."""
+        return setup_state["unloaded"]
+
     # The IDs of the groups whose last scan failed or could not load a dashboard. A later
     # update tries those scans again, at most UPDATE_RETRIES times in a row.
     trouble: set[str] = set()
@@ -218,7 +223,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connection: websocket_api.ActiveConnection,
         msg: dict[str, Any],
     ) -> None:
-        group = None if setup_state["unloaded"] else group_of(connection)
+        group = None if unloaded() else group_of(connection)
         if group is None:
             original_handler(hass, connection, msg)
             return
@@ -237,7 +242,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.exception("Resolving resources failed; sending the full list")
             original_handler(hass, connection, msg)
             return
-        if setup_state["unloaded"]:
+        if unloaded():
             # The unload came during the scan: the full list, as with no integration.
             original_handler(hass, connection, msg)
             return
@@ -299,7 +304,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ) -> None:
         # Only the frontend's unfiltered "all states" subscription is narrowed. After the
         # unload, another integration can still call this handler: it then changes nothing.
-        group = None if setup_state["unloaded"] else group_of(connection)
+        group = None if unloaded() else group_of(connection)
         if (
             group is None
             or not group.filter_states
@@ -328,7 +333,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # unloaded, need no scan.
                     if (
                         connection.subscriptions.get(msg_id) is waiting
-                        and not setup_state["unloaded"]
+                        and not unloaded()
                     ):
                         had_trouble = group.group_id in trouble
                         try:
@@ -353,7 +358,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         connection.send_result(msg_id)
                         return
                     del connection.subscriptions[msg_id]
-                    if setup_state["unloaded"]:
+                    if unloaded():
                         # The unload came during the wait. The page goes to the handler
                         # that is registered now. After a reload that is the new setup's
                         # handler, which narrows the page.
@@ -456,7 +461,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         the ID of each group that got a scan.
         """
         async with change_lock:
-            if setup_state["unloaded"]:
+            if unloaded():
                 return
             current = groups()
             sets: dict[str, set[str] | None] = {}
@@ -474,7 +479,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if only is not None and group.group_id not in only:
                         continue
                     scanned = await group_sets(sets, failed, group, tried)
-                    if setup_state["unloaded"]:
+                    if unloaded():
                         # The unload came during the scan. It gave each page all states.
                         return
                     if not scanned:
@@ -505,7 +510,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         the ID of each group that got a scan.
         """
         async with change_lock:
-            if setup_state["unloaded"]:
+            if unloaded():
                 return
             current = groups()
             sets: dict[str, set[str] | None] = {}
@@ -529,7 +534,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if group is None or not group.filter_states:
                         continue
                     scanned = await group_sets(sets, failed, group, tried)
-                    if setup_state["unloaded"]:
+                    if unloaded():
                         return
                     if not scanned:
                         continue
@@ -580,7 +585,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def request_update(only: set[str] | None = None) -> None:
         """Ask for an update of the open pages in these groups, or in each group for None."""
-        if setup_state["unloaded"]:
+        if unloaded():
             return
         if only is None:
             wanted_updates["all"] = True
@@ -625,7 +630,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def request_later_update(only: set[str] | None = None) -> None:
         """Ask for an update REGISTRY_REFRESH_DELAY seconds from the first such request."""
-        if setup_state["unloaded"]:
+        if unloaded():
             return
         if only is None:
             later["all"] = True
