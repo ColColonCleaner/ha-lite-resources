@@ -46,5 +46,5 @@ jobs:
       # The full type checks of mypy-homeassistant.ini. mypy reads the types of Home
       # Assistant from the source of its core at the tag below. Nothing of that source
       # runs, and no package of Home Assistant is installed.
-      - run: git clone --depth 1 --branch 2026.11.2 https://github.com/home-assistant/core ../home-assistant-core
+      - run: git clone --depth 1 --branch 2026.11.3 https://github.com/home-assistant/core ../home-assistant-core
       - run: MYPYPATH=../home-assistant-core .venv/bin/python -m mypy --config-file mypy-homeassistant.ini

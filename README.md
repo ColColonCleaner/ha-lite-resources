@@ -252,7 +252,7 @@ The tests need Python 3.12 or later and the package `voluptuous`. They run again
 The command `mypy` reads no Home Assistant, so its result is the same on each machine. It checks the calls inside the integration, and each name from Home Assistant has the type `Any` there. A second type check reads the types of Home Assistant from the source of its core. It needs a clone of that source at the tag of your Home Assistant version, and it runs nothing of it:
 
 ```bash
-git clone --depth 1 --branch 2026.11.2 https://github.com/home-assistant/core ../home-assistant-core
+git clone --depth 1 --branch 2026.11.3 https://github.com/home-assistant/core ../home-assistant-core
 MYPYPATH=../home-assistant-core mypy --config-file mypy-homeassistant.ini
 ```
 

@@ -98,6 +98,24 @@ class ChecksTest(unittest.TestCase):
             _validate.HASSFEST_IMAGE.startswith("ghcr.io/home-assistant/hassfest@")
         )
 
+    def test_each_place_names_one_tag_of_the_core_source(self) -> None:
+        # The workflow, the README and the configuration of the full type check each give
+        # the command that clones Home Assistant core. One tag serves all three.
+        tags = []
+        for name in (
+            ".github/workflows/validate.yaml",
+            "README.md",
+            "mypy-homeassistant.ini",
+        ):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            found = re.findall(
+                r"--branch (\S+) https://github\.com/home-assistant/core", text
+            )
+            self.assertEqual(len(found), 1, name)
+            tags.extend(found)
+        self.assertEqual(len(set(tags)), 1, tags)
+        self.assertRegex(tags[0], r"^\d{4}\.\d{1,2}\.\d+$")
+
     def test_run_holds_each_check_one_time_and_hassfest_last(self) -> None:
         names = [name for name, _check in _validate.checks({}, False)]
         self.assertEqual(
