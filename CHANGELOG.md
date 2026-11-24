@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Each validation runs before a commit
+
+The integration's code did not change. Its folder is the same as in the commit of 0.3.9.
+
+- **hassfest never ran on this fork before.** It was a job of the Validate workflow only, and that workflow never ran on GitHub. So no version up to 0.3.9 had Home Assistant's own validation. Its first run on 0.3.9 found no error and no warning.
+- **One script runs each validation: `python scripts/validate.py`.** It runs the unit tests, `ruff check`, the format check, both type checks and hassfest. It has no option that leaves a check out, and a check that cannot run is a failed check. A test compares the script's checks with the workflow's steps.
+- **hassfest runs in the action's container image, with no network and no volume.** hassfest has no release as a package. The image is named by its digest, the integration's files reach the container as a tar stream, and the container holds no capability. The container can run on a host that the script reaches with `ssh`.
+- **The script fails for a warning of hassfest.** hassfest exits with 0 for a warning, such as a discovery step with no unique ID.
+- **Each plugin of hassfest that applies was proven with a fault.** A run for one integration loads 24 plugins, and each of the 24 ran. 11 of them read the files of a custom integration: `manifest`, `json`, `translations`, `services`, `config_flow`, `dependencies`, `requirements`, `config_schema`, `icons`, `triggers` and `conditions`. 17 copies of the integration with one fault each went through the same route, and hassfest named each fault. The other 13 plugins build index files of Home Assistant core, or check a core integration only.
+- **A new test asks that each service has a name and a description.** hassfest asks this of a core integration only.
+- **The script can refuse a working tree that holds more than the commit**, with the option `--tree-is-the-commit`, for use in a `pre-commit` hook. The checks read the working tree, so a file that the commit leaves out would make the result wrong.
+- **A check gets none of git's hook variables, except the check of the working tree.** In a hook, git names its repository in variables such as `GIT_DIR`. With them, a unit test that makes a scratch repository acts on the clone in its place. The tests of the script run with such variables that name a decoy.
+- The HACS action reads the repository on GitHub, so it has no local run. Three unit tests cover its checks of files.
+
 ## 0.3.9 - 2026-11-24
 
 A fourth independent review read the changes of 0.3.8 and the two commits with the static checks. It gave 22 findings: no critical one, no high one, 4 medium and 18 low. Each fault in behaviour needs a scan that fails, a scan that hangs or a YAML dashboard. The review found no fault on the path of a panel whose dashboards are stored in the UI and whose scan works. This version corrects each finding, and it states each limit that stays. It also adds a second type check, which reads the types of Home Assistant from the source of its core.

@@ -224,7 +224,21 @@ Some gaps give no error. A card type that no file seems to provide is in the log
 
 Issues and pull requests are welcome. Please include your Home Assistant version and the output of `lite_resources.preview`.
 
-Before a pull request, run the tests and the static checks from the root of the repository:
+Before each commit, run each validation with one command:
+
+```bash
+python scripts/validate.py
+```
+
+The script runs the unit tests, the static checks, both type checks and hassfest, and it has no option that leaves a check out. It exits with 1 when a check fails or cannot run. The comment at the top of [scripts/validate.py](scripts/validate.py) names the two environment variables that it reads.
+
+hassfest is Home Assistant's own validation of an integration's manifest, translations and services. It has no release as a package, so the script runs the container image of the GitHub action `home-assistant/actions/hassfest`, on this machine or on a host that it reaches with `ssh`. The image is named by its digest, and the container gets no network and no volume. The script also fails for a warning of hassfest, which hassfest itself lets pass.
+
+To make git refuse a commit that fails a check, add a `pre-commit` hook to your clone that runs `python scripts/validate.py --tree-is-the-commit`. With that option, the script first refuses a working tree that holds more than the commit.
+
+The HACS action reads the repository on GitHub, so it has no local run. The unit tests cover its three checks of files: the brand icon, `hacs.json` and this README.
+
+These are the checks of the script apart from hassfest, as single commands from the root of the repository:
 
 ```bash
 python -m unittest discover -s tests

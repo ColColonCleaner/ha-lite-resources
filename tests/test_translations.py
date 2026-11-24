@@ -31,6 +31,17 @@ class TranslationsTest(unittest.TestCase):
         )
         self.assertEqual(english, _strings())
 
+    def test_each_service_has_a_name_and_a_description(self) -> None:
+        # hassfest asks this of a core integration only. Home Assistant shows the raw
+        # key of a service with no name.
+        services_file = (PACKAGE / "services.yaml").read_text(encoding="utf-8")
+        services = re.findall(r"^([a-z_]+):", services_file, flags=re.MULTILINE)
+        self.assertEqual(services, ["preview"])
+        texts = _strings()["services"]
+        for service in services:
+            for key in ("name", "description"):
+                self.assertTrue(texts[service].get(key), f"{service}: {key}")
+
     def test_each_field_of_the_group_form_has_a_label_and_a_description(self) -> None:
         names = re.findall(r"vol\.(?:Required|Optional)\(\s*(CONF_[A-Z_]+)", self.flow)
         fields = {getattr(_const, name) for name in names}
