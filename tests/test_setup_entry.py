@@ -888,6 +888,9 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         # A kiosk user is no administrator: Home Assistant refuses its call.
         with self.assertRaises(_Unauthorized):
             await preview(_call("u-w1"))
+        # A user that does not exist is refused too.
+        with self.assertRaises(_Unauthorized):
+            await preview(_call("u-deleted"))
         # An administrator gets the answer, through Home Assistant's wrapper.
         answer = await preview(_call("u-admin"))
         self.assertEqual(answer["groups"][0]["group"], "Workshop kiosks")

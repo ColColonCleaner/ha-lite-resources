@@ -114,8 +114,8 @@ class Unauthorized(Exception):
     """Stand-in for homeassistant.exceptions.Unauthorized."""
 
 
-class UnknownUser(Exception):
-    """Stand-in for homeassistant.exceptions.UnknownUser."""
+class UnknownUser(Unauthorized):
+    """Stand-in for homeassistant.exceptions.UnknownUser, which is an Unauthorized there."""
 
 
 def _async_register_admin_service(
