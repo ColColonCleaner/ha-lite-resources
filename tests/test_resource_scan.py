@@ -6,9 +6,9 @@ Each case comes from a review finding on the resource scan.
 from __future__ import annotations
 
 import gzip
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 
 from test_resolver import _Dashboard, _Hass, _resolver, _write
 
@@ -16,7 +16,7 @@ FileCache = _resolver.FileCache
 names_in_javascript = _resolver.names_in_javascript
 
 # A bundle that registers its elements only through the minified decorator of Lit. The
-# scan sees the file name's element, and it does not see the second element.
+# scan sees the element that the file name gives, and it does not see the second element.
 LAYOUT_CARD_JS = b"""
 const t=t=>(e,o)=>{void 0!==o?o.addInitializer(()=>{customElements.define(t,e)}):customElements.define(t,e)};
 let Grid=class extends s{};Grid=e([t("grid-layout")],Grid);
@@ -158,6 +158,51 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         summary = await self._resolve(card)
         self.assertIn("layout-card", summary["needed_types"])
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
+
+    async def test_custom_type_that_a_template_gives_as_a_quoted_text(self) -> None:
+        # The YAML key is "type", so the string itself holds no word "type".
+        for text in (
+            "[[[ return 'custom:layout-card' ]]]",
+            "${ vars[0] ? 'custom:layout-card' : 'entities' }",
+            '{{ "custom:layout-card" if is_state("sun.sun", "above_horizon") }}',
+            "type: custom:layout-card\nentity: light.x",
+        ):
+            summary = await self._resolve({"type": "custom:config-template-card", "card": text})
+            self.assertIn("layout-card", summary["needed_types"], text)
+
+    async def test_three_pieces_give_the_guess_no_name(self) -> None:
+        # The last two of three pieces are no name that the file holds.
+        _write(
+            self.root,
+            "three/three.js",
+            b'const t=t=>e=>customElements.define(t,e);const n="my-"+"fancy-"+"thing";',
+        )
+        self.resources.append({"url": "/hacsfiles/three/three.js", "type": "module"})
+        summary = await self._resolve({"type": "custom:fancy-thing"})
+        self.assertIn("/hacsfiles/three/three.js", summary["excluded"])
+        self.assertEqual(summary["guessed_types"], [])
+        self.assertEqual(summary["unresolved_types"], ["fancy-thing"])
+
+    async def test_dashboard_that_cannot_be_loaded_is_left_out_of_the_resources(self) -> None:
+        # The browser shows no card of such a dashboard, so the list needs none of its
+        # resources. The log names the dashboard one time for each error text.
+        broken = _Dashboard(None, fail=True)
+        dashboards = {"d": _dashboard({"type": "custom:layout-card"}), "yaml": broken}
+        hass = _Hass(self.root, dashboards, self.resources)
+        options = {"dashboards": ["d", "yaml"], "include_unscannable": False}
+        with self.assertLogs(_resolver._LOGGER, level="WARNING") as logs:
+            summary = (await _resolver.async_resolve(hass, options, FileCache())).as_dict()
+            await _resolver.async_resolve(hass, options, FileCache())
+        self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("yaml", logs.records[0].getMessage())
+        # The file is correct for a time. The same error then comes back, and it is new.
+        dashboards["yaml"] = _dashboard({"type": "tile"})
+        await _resolver.async_resolve(hass, options, FileCache())
+        dashboards["yaml"] = broken
+        with self.assertLogs(_resolver._LOGGER, level="WARNING") as logs:
+            await _resolver.async_resolve(hass, options, FileCache())
+        self.assertEqual(len(logs.records), 1)
 
     async def test_custom_type_in_plain_text_is_no_card(self) -> None:
         card = {"type": "markdown", "content": "Do not use custom:layout-card here."}

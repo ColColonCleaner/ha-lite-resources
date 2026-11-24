@@ -34,7 +34,7 @@
           "data_description": {
             "name": "For example 'Workshop kiosks'.",
             "users": "These users get the reduced resource list and state stream on every device they log in on. A user can be in one group only.",
-            "dashboards": "Every dashboard this group's users open. These dashboards' resources and entities are found automatically.",
+            "dashboards": "Every dashboard that the users in this group open. The resources and the entities on these dashboards are found automatically.",
             "filter_states": "Stream live updates only for entities on their dashboards (plus group members). Big CPU saving on slow panels; other entities show as unavailable for these users.",
             "extra_entities": "Entities to keep streaming even though they aren't on the dashboards.",
             "include_unscannable": "Resources served by integrations or other sites can't be read; keep them loaded (recommended). A file named after a card these dashboards don't use is still skipped.",
@@ -58,7 +58,7 @@
           "data_description": {
             "name": "For example 'Workshop kiosks'.",
             "users": "These users get the reduced resource list and state stream on every device they log in on. A user can be in one group only.",
-            "dashboards": "Every dashboard this group's users open. These dashboards' resources and entities are found automatically.",
+            "dashboards": "Every dashboard that the users in this group open. The resources and the entities on these dashboards are found automatically.",
             "filter_states": "Stream live updates only for entities on their dashboards (plus group members). Big CPU saving on slow panels; other entities show as unavailable for these users.",
             "extra_entities": "Entities to keep streaming even though they aren't on the dashboards.",
             "include_unscannable": "Resources served by integrations or other sites can't be read; keep them loaded (recommended). A file named after a card these dashboards don't use is still skipped.",

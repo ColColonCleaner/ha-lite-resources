@@ -28,3 +28,12 @@ jobs:
       - run: python3 -m venv .venv
       - run: .venv/bin/python -m pip install voluptuous
       - run: .venv/bin/python -m unittest discover -s tests
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The static checks of ruff.toml. The version is fixed, because the rule set is the
+      # default set of that version. Use the same version for a local run.
+      - run: python3 -m venv .venv
+      - run: .venv/bin/python -m pip install ruff==0.17.5
+      - run: .venv/bin/python -m ruff check .

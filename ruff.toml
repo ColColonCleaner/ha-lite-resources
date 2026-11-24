@@ -1,0 +1,22 @@
+# The static checks of this repository, with ruff (https://docs.astral.sh/ruff/).
+# Run them from the root of the repository:
+#
+#     ruff check .
+#
+# The rule set is the default set of the ruff version that the job "lint" in
+# .github/workflows/validate.yaml pins. Use that version for a local run.
+
+# The unit tests run on Python 3.12 and later, so no check may ask for newer syntax.
+target-version = "py312"
+
+[lint]
+# No rule is added and none is removed. A line that keeps a finding on purpose has a
+# "noqa" comment with the rule, and the reason on the line before it.
+
+[lint.isort]
+# The import order that the files of the integration have: "import x" and "from x import
+# y" lines in one alphabetical list, the names of one module on one line, and the
+# imports from Home Assistant in a block of their own, after the third-party block.
+force-sort-within-sections = true
+combine-as-imports = true
+known-first-party = ["homeassistant"]

@@ -164,7 +164,10 @@ class GroupSubentryFlow(ConfigSubentryFlow):
     """Add or change one group of lite users."""
 
     def _errors(self, user_input: dict[str, Any], group_id: str | None) -> dict[str, str]:
-        """Return the input's form errors for the group with this ID (None: a new one)."""
+        """Return the form errors for this input.
+
+        `group_id` is the ID of the group, and None for a new group.
+        """
         if not str(user_input.get(CONF_NAME, "")).strip():
             return {CONF_NAME: "no_name"}
         if not user_input.get(CONF_USERS):

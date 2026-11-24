@@ -1,14 +1,14 @@
 """Entities that a card finds by itself: the area card and the scheduler card.
 
 The cases come from a kitchen tablet. Its dashboard holds area cards for two doors and a
-scheduler card. None of that dashboard's cards names the lights, the motion sensors or the
+scheduler card. No card on that dashboard names the lights, the motion sensors or the
 schedules that those cards show.
 """
 
 from __future__ import annotations
 
-import unittest
 from types import SimpleNamespace
+import unittest
 
 from support import install_homeassistant_stubs, load
 

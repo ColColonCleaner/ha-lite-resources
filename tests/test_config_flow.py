@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-import unittest
 from types import SimpleNamespace
+import unittest
 
 from support import ConfigSubentry, _default, _module, install_homeassistant_stubs, load
 
 install_homeassistant_stubs()
+
+# What a schema raises for a value that a selector refuses. The schema of voluptuous
+# raises its own error for the ValueError of the stand-in selector. The stand-in schema
+# passes the ValueError on.
+try:
+    from voluptuous import Invalid as _Invalid
+except ImportError:
+    _REFUSED: tuple[type[Exception], ...] = (ValueError,)
+else:
+    _REFUSED = (ValueError, _Invalid)
 
 
 class _Flow:
@@ -30,7 +40,8 @@ class _Selector:
     """Stand-in for a selector. It keeps its configuration.
 
     With options, it refuses a value outside them, as SelectSelector.__call__ of Home
-    Assistant does for a field with no custom value.
+    Assistant does for a field with no custom value. As that function does, it also
+    refuses a value that is no list for a field that takes more than one value.
     """
 
     def __init__(self, config=None) -> None:
@@ -39,6 +50,8 @@ class _Selector:
     def __call__(self, value):
         options = self.config.get("options") if isinstance(self.config, dict) else None
         if options is not None:
+            if self.config.get("multiple") and not isinstance(value, list):
+                raise ValueError("Value should be a list")
             allowed = {option["value"] for option in options}
             for item in value if isinstance(value, list) else [value]:
                 if item not in allowed:
@@ -107,7 +120,7 @@ class GroupFormTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_stored_value_that_is_no_option_now_stays_in_the_form(self) -> None:
         # A select field refuses a value outside its options. So a deleted user, a deleted
-        # dashboard and an older version's resource URL must stay among them.
+        # dashboard and a resource URL from an older version must stay among them.
         current = {
             "users": ["u-w1", "u-deleted"],
             "dashboards": ["dashboard-old"],
@@ -130,8 +143,11 @@ class GroupFormTest(unittest.IsolatedAsyncioTestCase):
         schema = await _flow._async_group_schema(_hass(), current, False)
         defaults = {str(key): key.default() for key in schema.schema}
         self.assertEqual(schema(dict(defaults))["users"], ["u-w1", "u-deleted", "u-old"])
-        with self.assertRaises(Exception):
+        with self.assertRaises(_REFUSED):
             schema({**defaults, "users": ["u-nobody"]})
+        # A value that is no list is refused for a field that takes more than one value.
+        with self.assertRaises(_REFUSED):
+            schema({**defaults, "users": "u-w1"})
 
     async def test_stored_user_that_is_not_active_shows_its_name(self) -> None:
         schema = await _flow._async_group_schema(_hass(), {"users": ["u-old", "u-deleted"]}, False)

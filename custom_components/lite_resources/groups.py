@@ -1,4 +1,4 @@
-"""Groups of lite users, and their open pages' live state subscriptions.
+"""Groups of lite users, and the live state subscriptions that their open pages hold.
 
 A group has a name, its users, its dashboards and its options. A user belongs to at most
 one group. This module imports nothing from Home Assistant, so that its logic runs in a
@@ -7,11 +7,11 @@ plain unit test.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 import functools
 import logging
 import sys
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
@@ -39,15 +39,15 @@ GROUP_KEYS = (
     CONF_EXTRA_ENTITIES,
 )
 
-# The removal list's key in an entity event of the subscribe_entities stream, as
+# The key for the removal list in an entity event of the subscribe_entities stream, as
 # homeassistant.components.websocket_api.messages.ENTITY_EVENT_REMOVE defines it.
 ENTITY_EVENT_REMOVE = "r"
 
 # The state change event, as homeassistant.const.EVENT_STATE_CHANGED defines it.
 EVENT_STATE_CHANGED = "state_changed"
 
-# The function that forwards a subscribe_entities subscription's state changes to its
-# page, and the Home Assistant module that defines it.
+# The function that forwards the state changes of a subscribe_entities subscription to
+# its page, and the Home Assistant module that defines it.
 CORE_FORWARD_FUNCTION = "_forward_entity_changes"
 CORE_FORWARD_MODULE = "homeassistant.components.websocket_api.commands"
 
@@ -81,7 +81,7 @@ class Group:
 
 
 def groups_from_subentries(subentries: Mapping[str, Any]) -> list[Group]:
-    """Return each of a config entry's group subentries as a Group, in the stored order."""
+    """Return each group subentry in a config entry as a Group, in the stored order."""
     return [
         Group(sub.subentry_id, sub.title, dict(sub.data))
         for sub in subentries.values()
@@ -140,7 +140,7 @@ def users_in_other_groups(
 
 
 def legacy_group_data(options: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Return one group's data from a single-group version's options.
+    """Return the data for one group, taken from the options of a single-group version.
 
     Versions up to 0.2.1 kept one set of users and dashboards in the config entry's
     options. None means that those options name no user, so no group results.
@@ -156,13 +156,13 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
     Home Assistant keeps no list of its websocket connections. Its subscribe_entities
     handler puts a listener for state changes on the event bus: a partial of the function
     CORE_FORWARD_FUNCTION with the arguments (send_message, entity_ids, entity_filter,
-    user, message ID as bytes). `send_message` is one of the connection's methods, and
+    user, message ID as bytes). `send_message` is a method of the connection, and
     `entity_ids` and `entity_filter` are None for a subscription to all entities.
 
-    This reads Home Assistant's internals: the event bus's listener list and that partial.
-    An item with another layout is left out, so a later Home Assistant version with
-    another layout gives an empty list. The read catches each exception, because an
-    internal's layout can change in any way.
+    This reads internals of Home Assistant: the listener list of the event bus, and that
+    partial. An item with another layout is left out, so a later Home Assistant version
+    with another layout gives an empty list. The read catches each exception, because
+    the layout of an internal can change in any way.
     """
     return search_state_subscriptions(bus)[0]
 
@@ -179,7 +179,8 @@ def search_state_subscriptions(bus: Any) -> tuple[list[tuple[Any, int]], int]:
     unreadable = 0
     try:
         listeners = list(bus._listeners.get(EVENT_STATE_CHANGED, ()))
-    except Exception:  # an event bus with another layout
+    # An event bus with another layout can raise any error.
+    except Exception:  # noqa: BLE001
         return found, unreadable
     for item in listeners:
         try:
@@ -190,7 +191,8 @@ def search_state_subscriptions(bus: Any) -> tuple[list[tuple[Any, int]], int]:
                 or getattr(func, "__module__", None) != CORE_FORWARD_MODULE
             ):
                 continue
-        except Exception:  # a listener with another layout, which does not hold that function
+        # A listener with another layout does not hold that function, and it is no fault.
+        except Exception:  # noqa: BLE001, S112
             continue
         try:
             if not isinstance(target, functools.partial) or target.keywords:
@@ -204,7 +206,8 @@ def search_state_subscriptions(bus: Any) -> tuple[list[tuple[Any, int]], int]:
                 raise TypeError("an argument has another type")
             msg_id = int(message_id)
             subscriptions = connection.subscriptions
-        except Exception:  # the function is there, and its arguments are not as expected
+        # The function is there, and its arguments are not as expected.
+        except Exception:  # noqa: BLE001
             unreadable += 1
             continue
         if entity_ids is None and entity_filter is None and msg_id in subscriptions:
@@ -215,8 +218,8 @@ def search_state_subscriptions(bus: Any) -> tuple[list[tuple[Any, int]], int]:
 def adoption_fault(bus: Any) -> str | None:
     """Return why the search for early subscriptions cannot work here, or None when it can.
 
-    The search reads two of Home Assistant's internals: the event bus's listener table, and
-    the function CORE_FORWARD_FUNCTION in the module CORE_FORWARD_MODULE. On a version
+    The search reads two internals of Home Assistant: the listener table of the event bus,
+    and the function CORE_FORWARD_FUNCTION in the module CORE_FORWARD_MODULE. On a version
     that lacks one of them, the search finds nothing and reports nothing by itself.
     """
     if not isinstance(getattr(bus, "_listeners", None), Mapping):
@@ -247,7 +250,7 @@ class _QuietConnection:
 
 @dataclass
 class _Live:
-    """One of an open page's narrowed subscribe_entities subscriptions."""
+    """One narrowed subscribe_entities subscription that an open page holds."""
 
     connection: Any
     msg: dict[str, Any]
@@ -292,7 +295,7 @@ class LiveSubscriptions:
     def update(self, live: _Live, entities: Iterable[str] | None) -> bool:
         """Give a live subscription a new entity set. None gives the page all entities.
 
-        The page keeps its subscription ID. It receives the new set's states, and a
+        The page keeps its subscription ID. It receives the states of the new set, and a
         removal for each entity that left the set. Returns False when the set is unchanged,
         and when the handler fails. After a failure the page keeps its earlier set.
         """
@@ -312,8 +315,8 @@ class LiveSubscriptions:
         self._live.pop(key, None)
         if wanted is None:
             return True
-        # The page is in the table before the removal goes out, so that message's failure
-        # leaves no narrowed listener that the table does not know.
+        # The page is in the table before the removal goes out, so a failure of that
+        # message leaves no narrowed listener that the table does not know.
         self._track(_Live(live.connection, live.msg, wanted))
         removed = live.entities - wanted
         if removed:

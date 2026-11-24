@@ -1,4 +1,4 @@
-"""Groups of lite users, and their open pages' narrowed state subscriptions.
+"""Groups of lite users, and the narrowed state subscriptions that their open pages hold.
 
 The cases come from two sets of panels in one home: a workshop's kiosks, which show
 one dashboard, and a kitchen tablet, which shows another.
@@ -7,8 +7,8 @@ one dashboard, and a kitchen tablet, which shows another.
 from __future__ import annotations
 
 import functools
-import unittest
 from types import SimpleNamespace
+import unittest
 
 from support import load
 
@@ -165,7 +165,7 @@ class _Core:
     def subscribe(self, connection, msg) -> None:
         # Home Assistant's handler reads both keys with no default. Its schema adds
         # them, so a message that did not pass the schema raises KeyError here.
-        msg["include"], msg["exclude"]  # noqa: B018
+        msg["include"], msg["exclude"]
         call = {"entity_ids": msg.get("entity_ids"), "ended": False}
         self.calls.append(call)
 
@@ -322,7 +322,7 @@ def _other_listener(event):
 
 
 def _job(connection, msg_id, entity_ids=None, entity_filter=None, func=_forward_entity_changes):
-    """One item of the event bus's listener list, in Home Assistant's layout."""
+    """One item in the listener list of the event bus, in Home Assistant's layout."""
     listener = functools.partial(
         func, connection.send_message, entity_ids, entity_filter, connection.user, str(msg_id).encode()
     )
@@ -415,7 +415,7 @@ class AdoptTest(unittest.TestCase):
         self.assertEqual(len(self.live), 1)
 
     def test_adopted_subscription_is_narrowed_also_when_the_page_holds_no_other_entity(self) -> None:
-        # Early in a start, the page can hold only its dashboards' entities.
+        # Early in a start, the page can hold only the entities on its dashboards.
         self.assertTrue(self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a", "sensor.b"}))
         self.assertTrue(self.core.calls[0]["ended"])
         self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.b"])
@@ -446,7 +446,7 @@ class AdoptTest(unittest.TestCase):
 
     def test_adoption_with_no_schema_fails_and_changes_nothing(self) -> None:
         # A message that did not pass the schema makes the handler fail. That was the
-        # first 0.3.4 code's fault. The page must then keep its first listener.
+        # fault in the first 0.3.4 code. The page must then keep its first listener.
         live = LiveSubscriptions(self.core.subscribe)
         with self.assertLogs(_groups._LOGGER, level="ERROR"):
             self.assertFalse(live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a"}))

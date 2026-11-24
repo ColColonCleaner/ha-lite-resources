@@ -6,7 +6,7 @@ Assistant's registries. A user with a narrowed state stream needs those entities
 
 The area card's rules follow the frontend: the card in
 src/panels/lovelace/cards/hui-area-card.ts and its feature "area-controls" in
-src/data/area/area_controls.ts. The card shows one of its area's entities only when the
+src/data/area/area_controls.ts. The card shows an entity from its area only when that
 entity is not hidden and has no entity category. The Home Assistant imports are inside the
 functions that need them, so that the selection logic runs in a plain unit test.
 """
@@ -72,8 +72,8 @@ DOMAIN_CARDS: dict[str, tuple[str, ...]] = {"updates": ("update",)}
 # The visibility condition on the user's location
 # (src/panels/lovelace/common/validate-condition.ts).
 LOCATION_CONDITION = "location"
-# The control buttons' domains for the feature "area-controls". A cover control's name is
-# "cover-" and its device class.
+# The domains of the control buttons in the feature "area-controls". The name of a cover
+# control is "cover-" followed by its device class.
 CONTROL_DOMAINS = ("light", "fan", "switch", "cover")
 # An area card also reads these sensor classes from an attribute of entities of other domains.
 ATTRIBUTE_SENSOR_DOMAINS: dict[str, tuple[str, ...]] = {
@@ -138,7 +138,7 @@ def _strings(value: Any) -> frozenset[str]:
 
 
 def _control_domains(card: dict[str, Any]) -> frozenset[str]:
-    """Return an area card's control button domains."""
+    """Return the domains of the control buttons on an area card."""
     domains: set[str] = set()
     features = card.get("features")
     for feature in features if isinstance(features, list) else []:
@@ -194,26 +194,39 @@ def area_cards(config: Any) -> list[AreaCard]:
 
 
 def has_strategy(config: Any) -> bool:
-    """True when the dashboard, one of its views or one of their sections has a strategy.
+    """True when the browser makes a part of the dashboard from a strategy.
 
-    The frontend reads the key only at these three places (isStrategyDashboard,
-    isStrategyView and isStrategySection). The same key in another mapping, such as a
-    custom card's option or an action's data, is no strategy.
+    The frontend reads the key at the dashboard, at each view and at each section
+    (isStrategyDashboard, isStrategyView and isStrategySection). A section is an item in
+    the list "sections" of a view, of the sidebar in a view, or of another section
+    (hui-view-sidebar.ts and _createSections in hui-section.ts). The same key in another
+    mapping, such as an option of a custom card or the data of an action, is no strategy.
     """
+
+    def items(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
+
     if not isinstance(config, dict):
         return False
     if STRATEGY_KEY in config:
         return True
-    views = config.get("views")
-    for view in views if isinstance(views, list) else []:
+    sections: list[Any] = []
+    for view in items(config.get("views")):
         if not isinstance(view, dict):
             continue
         if STRATEGY_KEY in view:
             return True
-        sections = view.get("sections")
-        for section in sections if isinstance(sections, list) else []:
-            if isinstance(section, dict) and STRATEGY_KEY in section:
-                return True
+        sections.extend(items(view.get("sections")))
+        sidebar = view.get("sidebar")
+        if isinstance(sidebar, dict):
+            sections.extend(items(sidebar.get("sections")))
+    while sections:
+        section = sections.pop()
+        if not isinstance(section, dict):
+            continue
+        if STRATEGY_KEY in section:
+            return True
+        sections.extend(items(section.get("sections")))
     return False
 
 
@@ -238,7 +251,7 @@ def unscoped_reason(config: Any) -> str | None:
 
 
 def wide_domains(nodes: Iterable[Any]) -> set[str]:
-    """Return each domain whose every entity one of the dashboard's cards shows."""
+    """Return each domain for which some card on the dashboard shows every entity."""
     domains: set[str] = set()
     for node in nodes:
         if not isinstance(node, dict):
@@ -276,7 +289,7 @@ def discovered_entities(
     platforms: Iterable[str],
     entities: Iterable[RegistryEntity],
 ) -> set[str]:
-    """Return the entities that the area cards and these integrations' cards show."""
+    """Return each entity that an area card shows, or a card for one of these integrations."""
     cards = list(cards)
     platforms = set(platforms)
     return {
@@ -289,10 +302,10 @@ def discovered_entities(
 def registry_entities(hass: Any) -> list[RegistryEntity]:
     """Return each enabled entity in the entity registry, with its area and device class.
 
-    The area is the entity's own, or else its device's effective area: a child device with
-    no area of its own has its parent device's area. The device class is the state's
-    attribute, which is the value that the frontend filters on. An entity with no state
-    yet takes the registry's device class.
+    The area is the area of the entity itself, or else the effective area of its device: a
+    child device with no area of its own takes the area of its parent device. The device
+    class is the attribute on the state, which is the value that the frontend filters on.
+    An entity with no state yet takes the device class from the registry.
     """
     from homeassistant.helpers import device_registry as dr, entity_registry as er
 
@@ -326,7 +339,7 @@ def registry_entities(hass: Any) -> list[RegistryEntity]:
 
 
 def area_sensor_entities(hass: Any, cards: Iterable[AreaCard]) -> set[str]:
-    """Return the temperature and humidity entities that the cards' areas name.
+    """For each card, return the temperature and humidity entities that its area names.
 
     An area can name one entity for its temperature and one for its humidity. An area card
     then shows that entity, which can belong to another area.

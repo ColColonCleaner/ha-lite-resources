@@ -8,61 +8,17 @@ store them. One of the two dashboards is not linked from anywhere.
 
 from __future__ import annotations
 
-import importlib.util
 import os
+from pathlib import Path
 import sys
 import tempfile
 import types
 import unittest
-from pathlib import Path
 
+from support import install_homeassistant_stubs, load as _load
 
-def _install_homeassistant_stubs() -> None:
-    """Allow importing the resolver without a Home Assistant checkout."""
-    if "homeassistant.components.lovelace.const" in sys.modules:
-        return
-    modules = {
-        "homeassistant": types.ModuleType("homeassistant"),
-        "homeassistant.components": types.ModuleType("homeassistant.components"),
-        "homeassistant.components.lovelace": types.ModuleType(
-            "homeassistant.components.lovelace"
-        ),
-        "homeassistant.components.lovelace.const": types.ModuleType(
-            "homeassistant.components.lovelace.const"
-        ),
-        "homeassistant.core": types.ModuleType("homeassistant.core"),
-        "homeassistant.exceptions": types.ModuleType("homeassistant.exceptions"),
-    }
-    for name, module in modules.items():
-        sys.modules.setdefault(name, module)
-
-    class HomeAssistantError(Exception):
-        """Stand-in for the core error the resolver already catches."""
-
-    sys.modules["homeassistant.exceptions"].HomeAssistantError = HomeAssistantError
-    sys.modules["homeassistant.components.lovelace.const"].LOVELACE_DATA = "lovelace"
-    sys.modules["homeassistant.core"].HomeAssistant = object
-
-
-_install_homeassistant_stubs()
-
-ROOT = Path(__file__).resolve().parents[1]
-_PACKAGE = ROOT / "custom_components" / "lite_resources"
-
-
-def _load(module_name: str, filename: str):
-    """Load one integration module without running the package __init__."""
-    package = sys.modules.setdefault("lite_resources", types.ModuleType("lite_resources"))
-    package.__path__ = [str(_PACKAGE)]
-    package.__package__ = "lite_resources"
-    spec = importlib.util.spec_from_file_location(module_name, _PACKAGE / filename)
-    module = importlib.util.module_from_spec(spec)
-    module.__package__ = "lite_resources"
-    sys.modules[module_name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
+# The shared stand-ins, so that this file also runs by itself.
+install_homeassistant_stubs()
 
 _const = _load("lite_resources.const", "const.py")
 _resolver = _load("lite_resources.resolver", "resolver.py")

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import datetime
 import sys
-import unittest
 from types import SimpleNamespace
+import unittest
 
 from support import install_homeassistant_stubs, load
 
@@ -149,13 +149,34 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         found = await _entities({"d": _cards(button, custom)})
         self.assertLessEqual({"light.hall", "light.second"}, found)
 
-    async def test_dashboard_that_cannot_be_loaded_is_left_out(self) -> None:
-        # A YAML dashboard with a syntax error shows nothing, and the browser makes no card
-        # for it. The group stays narrowed to its other dashboard.
+    async def test_dashboard_that_cannot_be_loaded_stops_the_narrowing(self) -> None:
+        # A YAML dashboard with a syntax error can load after a correction, and no event
+        # is sure to come then. So the group is not narrowed, and the caller tries again.
         plain = _cards({"type": "tile", "entity": "light.hall"})
-        found = await _entities({"plain": plain, "yaml": "broken"})
-        self.assertIn("light.hall", found)
-        self.assertIn("can be loaded", await self._reason({"yaml": "broken"}))
+        with self.assertRaises(CannotNarrow) as raised:
+            await _entities({"plain": plain, "yaml": "broken"})
+        self.assertIn("the dashboard yaml cannot be loaded: bad YAML", str(raised.exception))
+        self.assertTrue(raised.exception.retry)
+        with self.assertRaises(CannotNarrow) as raised:
+            await _entities({"yaml": "broken"})
+        self.assertTrue(raised.exception.retry)
+
+    async def test_reason_that_no_later_try_changes_asks_for_no_retry(self) -> None:
+        for dashboards, keys in (
+            ({"home": {"strategy": {"type": "original-states"}}}, None),
+            ({"generated": None}, None),
+            ({}, ["deleted"]),
+        ):
+            with self.assertRaises(CannotNarrow) as raised:
+                await _entities(dashboards, keys)
+            self.assertFalse(raised.exception.retry)
+
+    async def test_strategy_section_in_a_sidebar_and_inside_a_section(self) -> None:
+        # The frontend makes a section element for each item of these two lists also.
+        sidebar = {"views": [{"sidebar": {"sections": [{"strategy": {"type": "common-controls"}}]}}]}
+        nested = {"views": [{"sections": [{"sections": [{"sections": [{"strategy": {}}]}]}]}]}
+        self.assertIn("strategy", await self._reason({"d": sidebar}))
+        self.assertIn("strategy", await self._reason({"d": nested}))
 
     async def test_badge_of_the_energy_settings(self) -> None:
         dashboard = {"views": [{"badges": [{"type": "gas-total"}], "cards": []}]}

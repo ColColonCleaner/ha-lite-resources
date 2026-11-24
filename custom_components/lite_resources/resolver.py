@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import gzip
 import logging
@@ -45,12 +45,16 @@ from .discovery import (
 _LOGGER = logging.getLogger(__name__)
 
 # A dashboard string that is "custom:xxx" as a whole (cards, rows, badges, features, and
-# cards nested inside pop-ups, stacks, sections or other cards' options).
+# cards nested inside pop-ups, stacks, sections or the options of other cards).
 _CUSTOM_TYPE = re.compile(r"custom:([A-Za-z0-9_.\-]+)")
-# "custom:xxx" inside a longer string, after a key "type", such as a template that
-# returns a card. The same words in plain text, with no such key, name no card.
+# "custom:xxx" inside a longer string names a card in two forms. The first form follows a
+# key "type", with quotes or with none, as in YAML text. The second form is a quoted text
+# by itself, such as the value that a template returns. The same words in plain text, in
+# neither form, name no card. Group 1 is the quote of the second form, and group 2 is the
+# type.
 _CUSTOM_TYPE_INSIDE = re.compile(
-    r"""type["']?\s*[:=]\s*["']custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)"""
+    r"""(?:type["']?\s*[:=]\s*["']?|(["'`]))"""
+    r"""custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)(?(1)\1)"""
 )
 # A dashed name this file actually registers, not every hyphenated token it
 # mentions. Mentions of another card ("button-card" inside an unrelated file)
@@ -78,9 +82,11 @@ _CONCAT_USED = re.compile(
     rb"""\s*(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3(?!\s*\+)"""
 )
 # Two quoted pieces with a plus in any place. Such a name is no registration by itself. It
-# counts as a name that the file holds, for the guess of a type with no provider.
+# counts as a name that the file holds, for the guess of a type with no provider. A third
+# piece before the two, or after them, gives another name. So a pair with a plus after it
+# does not match, and the caller drops a pair with a plus before it, which group 1 holds.
 _CONCAT_ANY = re.compile(
-    rb"""(["'])([a-z0-9_-]+)\1\s*\+\s*(["'])([a-z0-9_-]+)\3(?!\s*\+)"""
+    rb"""(\+\s*)?(["'])([a-z0-9_-]+)\2\s*\+\s*(["'])([a-z0-9_-]+)\4(?!\s*\+)"""
 )
 # A registration whose name is no quoted text, such as the call inside a minified
 # decorator. The scan cannot see which names such a file registers.
@@ -119,12 +125,21 @@ _GENERIC_STEMS = frozenset(
     }
 )
 # The keys of the warnings that the log already holds.
-_WARNED: set[Any] = set()
-# The URL path of each dashboard that a scan loads now, with the number of such loads.
-LOADING: Counter[Any] = Counter()
+_WARNED: set[tuple[Any, ...]] = set()
+# The dashboard that the current task loads now: its URL path, "active" while the load
+# runs, and "fired" when the dashboard's update event came during the load. Each task has
+# its own value, so an event from the load of another task does not count.
+_OWN_LOAD: ContextVar[dict[str, Any] | None] = ContextVar(
+    "lite_resources_own_load", default=None
+)
+# The configuration that the last load by this integration gave, by the URL path.
+_SEEN: dict[Any, Any] = {}
+_NOT_SEEN = object()
+# The functions that async_listen_changes added.
+_CHANGE_LISTENERS: list[Callable[[Any], None]] = []
 
 
-def _warn_once(key: Any, message: str, *args: Any) -> None:
+def _warn_once(key: tuple[Any, ...], message: str, *args: Any) -> None:
     """Log a warning one time. A warning at each request from each page hides a new one."""
     if key not in _WARNED:
         _WARNED.add(key)
@@ -132,10 +147,15 @@ def _warn_once(key: Any, message: str, *args: Any) -> None:
 
 
 class CannotNarrow(Exception):
-    """A group's dashboards do not say what one of the group's pages needs.
+    """The dashboards of a group do not say what a page in that group needs.
 
     The caller then sends all states, or the full resource list. The text is the reason.
+    `retry` is True when a later try can work, such as after a dashboard load that failed.
     """
+
+    def __init__(self, reason: str, retry: bool = False) -> None:
+        super().__init__(reason)
+        self.retry = retry
 
 
 @dataclass
@@ -180,7 +200,7 @@ class FileCache:
         ] = {}
 
     def _read(self, path: str) -> tuple[frozenset[str], frozenset[str]] | None:
-        """Return a file's registered names and quoted names, or None."""
+        """Return the registered names and the quoted names in a file, or None."""
         for candidate, opener in ((path, open), (path + ".gz", gzip.open)):
             try:
                 stat = os.stat(candidate)
@@ -193,7 +213,8 @@ class FileCache:
             try:
                 with opener(candidate, "rb") as fh:
                     data = fh.read()
-            except Exception as err:  # a cut or corrupt .gz file raises no OSError
+            # A cut or corrupt .gz file raises an error that is no OSError.
+            except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("Cannot read %s: %s", candidate, err)
                 return None
             found = names_in_javascript(data, _stem_from_filename(candidate))
@@ -203,7 +224,8 @@ class FileCache:
                 # whose registrations all have a quoted name registers no other one.
                 pairs = (
                     (left + right).decode()
-                    for _q1, left, _q2, right in _CONCAT_ANY.findall(data)
+                    for plus, _q1, left, _q2, right in _CONCAT_ANY.findall(data)
+                    if not plus
                 )
                 mentioned = frozenset(
                     {name.decode() for name in _QUOTED.findall(data)}
@@ -276,9 +298,7 @@ def names_in_javascript(data: bytes, stem: str = "") -> frozenset[str]:
 
 def _stem_from_filename(path: str) -> str:
     """Stem of a file on disk, ignoring a trailing ``.gz``."""
-    name = os.path.basename(path).lower()
-    if name.endswith(".gz"):
-        name = name[:-3]
+    name = os.path.basename(path).lower().removesuffix(".gz")
     return resource_stem(name)
 
 
@@ -363,7 +383,7 @@ async def async_all_resources(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 @dataclass
 class DashboardScan:
-    """One dashboard configuration's strings, keys and mappings."""
+    """The strings, the keys and the mappings in one dashboard configuration."""
 
     key: str
     config: Any
@@ -384,7 +404,7 @@ class DashboardScan:
             if whole:
                 found.add(whole.group(1))
             elif "custom:" in text:
-                found.update(_CUSTOM_TYPE_INSIDE.findall(text))
+                found.update(m.group(2) for m in _CUSTOM_TYPE_INSIDE.finditer(text))
         return found
 
 
@@ -393,7 +413,7 @@ def scan_dashboard(key: str, config: Any) -> DashboardScan:
 
     The walk reads the values themselves and not their JSON text. In JSON text, a line
     break inside a string is a backslash and a letter, which hides the entity ID after it,
-    and a value that JSON does not know, such as a YAML dashboard's date, has no text.
+    and a value that JSON does not know, such as a date in a YAML dashboard, has no text.
     """
     scan = DashboardScan(key, config)
     todo = [config]
@@ -414,16 +434,19 @@ def scan_dashboard(key: str, config: Any) -> DashboardScan:
 
 async def _async_dashboard_scans(
     hass: HomeAssistant, keys: list[str]
-) -> tuple[list[DashboardScan], list[str]]:
+) -> tuple[list[DashboardScan], list[str], dict[str, str]]:
     """Return a scan of each dashboard with a stored configuration.
 
-    The second value names each dashboard that exists and gives no configuration: the
-    browser makes its cards, or its load failed. A dashboard that does not exist is left
-    out of both. CannotNarrow is raised when none of the list's dashboards exists.
+    The second value names each dashboard that exists and has no stored configuration,
+    so the browser makes its cards. The third value gives the error text for each
+    dashboard that exists and cannot be loaded, such as a YAML dashboard with a syntax
+    error. A dashboard that does not exist is left out of all three. CannotNarrow is
+    raised when the first two values are empty, with the load error when there is one.
     """
     dashboards = hass.data[LOVELACE_DATA].dashboards
     scans: list[DashboardScan] = []
     without_config: list[str] = []
+    failed: dict[str, str] = {}
     for key in keys:
         if key == DEFAULT_DASHBOARD:
             # As Home Assistant's lovelace commands do for a request with no URL path.
@@ -433,39 +456,74 @@ async def _async_dashboard_scans(
         if dashboard is None:
             _warn_once(("no dashboard", key), "Dashboard %s not found", key)
             continue
+        _WARNED.discard(("no dashboard", key))
         url_path = getattr(dashboard, "url_path", None if key == DEFAULT_DASHBOARD else key)
-        LOADING[url_path] += 1
+        load = {"url_path": url_path, "active": True, "fired": False}
+        token = _OWN_LOAD.set(load)
         try:
             config = await dashboard.async_load(False)
         except ConfigNotFound:  # no stored configuration: the browser makes the cards
             without_config.append(key)
             continue
         except HomeAssistantError as err:  # such as a YAML dashboard with a syntax error
-            _warn_once(
-                ("load failed", key),
-                "Dashboard %s cannot be loaded, so it is left out: %s",
-                key,
-                err,
-            )
+            failed[key] = str(err)
             continue
         finally:
-            LOADING[url_path] -= 1
-            if LOADING[url_path] <= 0:
-                del LOADING[url_path]
+            # A task that started during the load holds a copy of the record.
+            load["active"] = False
+            _OWN_LOAD.reset(token)
+        previous = _SEEN.get(url_path, _NOT_SEEN)
+        _SEEN[url_path] = config
+        if load["fired"] and previous is not config and previous != config:
+            # This load found the change, so no other event tells the open pages. A file
+            # that fires at each load gives the same configuration, and stops here.
+            for listener in _CHANGE_LISTENERS.copy():
+                listener(url_path)
         scans.append(scan_dashboard(key, config))
     if not scans and not without_config:
-        raise CannotNarrow("none of the group's dashboards exists or can be loaded")
-    return scans, without_config
+        if failed:
+            raise _load_failure(failed)
+        raise CannotNarrow("no dashboard in the group exists")
+    return scans, without_config, failed
 
 
-def is_loading(url_path: str | None) -> bool:
-    """True while this integration's scan loads the dashboard with this URL path.
+def _load_failure(failed: dict[str, str]) -> CannotNarrow:
+    """Return the error for the first dashboard that could not be loaded.
 
-    A YAML dashboard's load can fire that dashboard's update event by itself. An event that
-    comes during such a load is the load's result, and the load gives the new
-    configuration, so that event needs no new scan.
+    Such a dashboard can load at a later try, so the error asks for one.
     """
-    return url_path in LOADING
+    key, error = next(iter(failed.items()))
+    return CannotNarrow(f"the dashboard {key} cannot be loaded: {error}", retry=True)
+
+
+def own_load_fired(url_path: str | None) -> bool:
+    """True when the update event of this dashboard came from this task's own load of it.
+
+    Home Assistant fires the update event of a YAML dashboard inside the load that finds
+    the changed file, and it calls each listener at once. So a listener that runs in the
+    task of a scan, while that scan loads the dashboard, sees the event of that load. The
+    scan then compares the new configuration with the last one, and calls the change
+    listeners when the two differ. An event from the load of another task gives False.
+    """
+    load = _OWN_LOAD.get()
+    if load is None or not load["active"] or load["url_path"] != url_path:
+        return False
+    load["fired"] = True
+    return True
+
+
+def async_listen_changes(listener: Callable[[Any], None]) -> Callable[[], None]:
+    """Call the listener with the URL path of a dashboard whose own load found a change.
+
+    Return the function that removes the listener.
+    """
+    _CHANGE_LISTENERS.append(listener)
+
+    def remove() -> None:
+        if listener in _CHANGE_LISTENERS:
+            _CHANGE_LISTENERS.remove(listener)
+
+    return remove
 
 
 async def async_dashboard_entities(
@@ -476,19 +534,23 @@ async def async_dashboard_entities(
     Any existing entity id that appears anywhere in the dashboards (cards, pop-ups,
     conditions, actions), the entities that a card finds by itself (the area card, a card
     in CARD_PLATFORMS, and a card that shows each entity in a domain), the members of any
-    groups among them, each group user's person entity, the configured extras, and a few
-    the frontend uses itself.
+    groups among them, the person entity of each user in the group, the configured extras,
+    and a few that the frontend uses itself.
 
     CannotNarrow is raised when the dashboards do not say which entities a page needs: a
     dashboard with no stored configuration, a strategy, or a card that no rule follows.
 
     `include_missing` keeps each name that has no state now. A state subscription needs
-    those names: the stream sends only its list's entities, and an entity can get its
+    those names: the stream sends only the entities in its list, and an entity can get its
     first state after a page connects, for example while Home Assistant starts.
     """
-    scans, without_config = await _async_dashboard_scans(
+    scans, without_config, failed = await _async_dashboard_scans(
         hass, list(options.get(CONF_DASHBOARDS, []))
     )
+    if failed:
+        # The page can open this dashboard after a correction, and no event is sure to
+        # come then. So the group gets all states, and the caller tries again later.
+        raise _load_failure(failed)
     if without_config:
         raise CannotNarrow(
             f"the dashboard {without_config[0]} has no stored configuration, so the "
@@ -525,9 +587,9 @@ async def async_dashboard_entities(
         # The entities that a card finds in the registries, which the text does not name.
         found |= discovered_entities(cards, platforms, entities)
         found |= area_sensor_entities(hass, cards)
-    # A person's or a device tracker's badge on a tile card, and a condition on the user's
-    # location, read each zone entity
-    # (src/panels/lovelace/cards/tile/badges/tile-badge.ts).
+    # The badge that a tile card shows for a person or for a device tracker reads each
+    # zone entity (src/panels/lovelace/cards/tile/badges/tile-badge.ts). A condition on
+    # the user's location reads each zone entity also.
     if location or any(
         entity_id.startswith(("person.", "device_tracker.")) for entity_id in found
     ):
@@ -581,7 +643,8 @@ async def async_resolve(
 ) -> Resolution:
     """Split the resources into those the configured dashboards need and the rest.
 
-    CannotNarrow is raised when none of the options' dashboards exists.
+    CannotNarrow is raised when no dashboard in the options exists, and when none of
+    them can be loaded.
     """
     result = Resolution(dashboards=list(options.get(CONF_DASHBOARDS, [])))
     # Match on the host and the path: the query string carries a version that changes
@@ -595,7 +658,19 @@ async def async_resolve(
     hints: set[str] = set()
     # A dashboard with no stored configuration holds core cards only, so it needs no
     # resource.
-    scans, _without_config = await _async_dashboard_scans(hass, result.dashboards)
+    scans, _without_config, failed = await _async_dashboard_scans(hass, result.dashboards)
+    # A dashboard that cannot be loaded shows no card in the browser, so its resources
+    # are not counted. The warning comes again when the error text changes.
+    for key, error in failed.items():
+        _warn_once(
+            ("load failed", key, error),
+            "Dashboard %s cannot be loaded, so the resource list leaves it out: %s",
+            key,
+            error,
+        )
+    loaded = set(result.dashboards) - set(failed)
+    for warned in [w for w in _WARNED if w[0] == "load failed" and w[1] in loaded]:
+        _WARNED.discard(warned)
     for scan in scans:
         needed.update(scan.custom_types())
         named = scan.keys | scan.strings
@@ -607,7 +682,7 @@ async def async_resolve(
     # The needed types of the resources that Always exclude names. The user refused their
     # provider, so no other file is sent for them as a guess.
     refused: set[str] = set()
-    # The readable files that provide no needed type, with each one's path.
+    # The readable files that provide no needed type, each with its path.
     unmatched: list[tuple[dict[str, Any], str, frozenset[str]]] = []
     for item in await async_all_resources(hass):
         url = item.get("url", "")

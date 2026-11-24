@@ -20,9 +20,12 @@ REGISTRY_EVENTS = (
 # The registries change in bursts. The open pages get one update this number of seconds
 # after the first change of a burst.
 REGISTRY_REFRESH_DELAY = 10
-# The longest time in seconds for one group's entity scan. The open pages' changes run
-# one after the other, so a scan with no end would hold each later change.
+# The longest wait in seconds for the entity scan of one group. The changes to the open
+# pages run one after the other, so a scan with no end would hold each later change.
 SCAN_TIMEOUT = 30
+# When the scan of a group fails, a later update tries it again. This is the largest
+# number of such tries in a row, each REGISTRY_REFRESH_DELAY seconds after the one before.
+UPDATE_RETRIES = 6
 
 CONF_USERS = "users"
 CONF_DASHBOARDS = "dashboards"
@@ -62,11 +65,13 @@ KEY_HINTS: dict[str, str] = {
 }
 
 # Dashboard values that only work when another resource is loaded. The card that reads
-# the value makes one of that resource's elements itself, so no "custom:" type names it.
+# the value creates an element that the other resource defines, so no "custom:" type
+# names that resource.
 # value in dashboard JSON -> substring of the resource URL that provides it.
 VALUE_HINTS: dict[str, str] = {
     # Advanced Camera Card: the live provider "webrtc-card" shows the stream in the
-    # WebRTC Camera integration's <webrtc-camera> element, and waits for it.
+    # <webrtc-camera> element that the WebRTC Camera integration provides, and waits
+    # for that element.
     "webrtc-card": "webrtc-camera",
 }
 
@@ -74,8 +79,8 @@ VALUE_HINTS: dict[str, str] = {
 # integration, and it reads each entity's state from the state stream.
 # card type -> the integration whose entities the card shows.
 CARD_PLATFORMS: dict[str, str] = {
-    # Scheduler card: a schedule is one of the scheduler integration's switches. The card
-    # shows an empty row for a schedule whose switch has no state.
+    # Scheduler card: a schedule is a switch that the scheduler integration provides. The
+    # card shows an empty row for a schedule whose switch has no state.
     "scheduler-card": "scheduler",
 }
 

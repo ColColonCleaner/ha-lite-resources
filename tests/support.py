@@ -1,20 +1,20 @@
-"""The tests' shared helpers.
+"""The helpers that the tests share.
 
-`load` loads one of the integration's modules without a Home Assistant checkout.
+`load` loads one module from the integration without a Home Assistant checkout.
 `install_homeassistant_stubs` puts stand-ins for the Home Assistant modules that the
 integration imports into `sys.modules`.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import importlib.util
+from pathlib import Path
 import sys
 import types
-import uuid
-from dataclasses import dataclass, field
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "custom_components" / "lite_resources"
@@ -114,21 +114,28 @@ class Unauthorized(Exception):
     """Stand-in for homeassistant.exceptions.Unauthorized."""
 
 
+class UnknownUser(Exception):
+    """Stand-in for homeassistant.exceptions.UnknownUser."""
+
+
 def _async_register_admin_service(
     hass, domain, service, func, schema=None, supports_response=None, **kwargs
 ) -> None:
     """Stand-in for helpers.service.async_register_admin_service.
 
     As in Home Assistant, the registered function is a wrapper. It refuses a call whose
-    context names a user that is no administrator, and it passes the function's answer
-    on. A call with no user in its context comes from Home Assistant itself.
+    context names a user that does not exist, or a user that is no administrator, and it
+    passes the answer of the function on. A call with no user in its context comes from
+    Home Assistant itself.
     """
 
     async def admin_handler(call):
         user_id = call.context.user_id
         if user_id:
             user = await hass.auth.async_get_user(user_id)
-            if user is None or not user.is_admin:
+            if user is None:
+                raise UnknownUser
+            if not user.is_admin:
                 raise Unauthorized
         return await func(call)
 
@@ -174,7 +181,7 @@ def _effective_area_id(hass, device) -> str | None:
 
 
 def install_homeassistant_stubs() -> None:
-    """Add each missing stand-in. The test files' order does not matter."""
+    """Add each missing stand-in. The order of the test files does not matter."""
     try:
         import voluptuous  # noqa: F401
     except ImportError:
@@ -244,7 +251,7 @@ def install_homeassistant_stubs() -> None:
         _convert_include_exclude_filter,
     )
 
-    # Each of a test's registries is an attribute of its stand-in for hass.
+    # Each registry that a test uses is an attribute of its stand-in for hass.
     for name in ("entity_registry", "device_registry", "area_registry"):
         _default(
             _module(f"homeassistant.helpers.{name}"),
