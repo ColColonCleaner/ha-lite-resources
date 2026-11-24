@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+## 0.3.9 - 2026-11-24
+
+A fourth independent review read the changes of 0.3.8 and the two commits with the static checks. It gave 22 findings: no critical one, no high one, 4 medium and 18 low. Each fault in behaviour needs a scan that fails, a scan that hangs or a YAML dashboard. The review found no fault on the path of a panel whose dashboards are stored in the UI and whose scan works. This version corrects each finding, and it states each limit that stays. It also adds a second type check, which reads the types of Home Assistant from the source of its core.
+
 ### Each validation runs before a commit
 
-The integration's code did not change. Its folder is the same as in the commit of 0.3.9.
+These changes came after the first commit of version 0.3.9. They add tooling and tests, and the integration's folder did not change.
 
 - **hassfest never ran on this fork before.** It was a job of the Validate workflow only, and that workflow never ran on GitHub. So no version up to 0.3.9 had Home Assistant's own validation. Its first run on 0.3.9 found no error and no warning.
 - **One script runs each validation: `python scripts/validate.py`.** It runs the unit tests, `ruff check`, the format check, both type checks and hassfest. It has no option that leaves a check out, and a check that cannot run is a failed check. A test compares the script's checks with the workflow's steps.
@@ -17,9 +21,19 @@ The integration's code did not change. Its folder is the same as in the commit o
 - The HACS action reads the repository on GitHub, so it has no local run. Three unit tests cover its checks of files.
 - **The full type check reads the core source at the tag `2026.11.3`.** The workflow, the README and `mypy-homeassistant.ini` named `2026.11.2`. The check passes against the new tag with no change to the code. A new test asks that the three places name one tag.
 
-## 0.3.9 - 2026-11-24
+### Each version has a release on GitHub
 
-A fourth independent review read the changes of 0.3.8 and the two commits with the static checks. It gave 22 findings: no critical one, no high one, 4 medium and 18 low. Each fault in behaviour needs a scan that fails, a scan that hangs or a YAML dashboard. The review found no fault on the path of a panel whose dashboards are stored in the UI and whose scan works. This version corrects each finding, and it states each limit that stays. It also adds a second type check, which reads the types of Home Assistant from the source of its core.
+These changes also came after the first commit of version 0.3.9, and the integration's folder did not change.
+
+- **Home Assistant showed a commit hash as the version of this fork**, because the fork had no release. HACS takes the version from the tag of the latest release, and a tag with no release does not count.
+- **The tag of a version is `v` plus the manifest's version**, such as `v0.3.9`.
+- **A new script, `scripts/release_notes.py`, checks a tag and prints the notes of its release.** It refuses a tag that does not fit the manifest's version, a changelog with no entry for the version, and a changelog with text under `Unreleased`. The notes are the changelog entry of the version.
+- **A new workflow, `Release`, runs the script for each pushed tag `v*` and makes the release.** With the option `--publish`, the script sends the request `Create a release` of the GitHub REST API. The request names no commit, so GitHub uses the tag that exists.
+- **The workflow stops for a name with no tag.** For such a name, GitHub makes a new tag on the default branch. So the workflow checks the repository out at the tag ref, and it compares the checked out commit with the tag's commit, before the request.
+- **Only the step that makes the release gets the token.** The token has write access to the contents and no other permission. The workflow names the checkout action by a commit, and the checkout keeps no token.
+- **A manual run of the workflow takes a tag as its input.** It makes the release of a tag whose run failed.
+- The workflow file has no local run. The unit tests cover the script, and they check the text of the workflow file. The first run on GitHub is the first proof of that file.
+- The README's section `Releasing` gives the steps of a release.
 
 ### The later tries after a failed scan
 

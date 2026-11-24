@@ -260,14 +260,23 @@ On Windows, set `MYPYPATH` with your shell's syntax. The Validate workflow runs 
 
 ## Releasing
 
-Create the GitHub release after the Validate workflow on that commit has succeeded.
+Each version has a release on GitHub. Its tag is `v` plus the manifest's version, such as `v0.3.9`. Home Assistant shows that tag as the integration's version, and it shows a commit hash for a repository with no release.
 
-1. Set `version` in `custom_components/lite_resources/manifest.json` to the new version, and add that version to `CHANGELOG.md`.
-2. Merge the change to `main`.
-3. Wait until the Validate workflow on that commit succeeds. The hassfest job and the HACS job both have to pass. `.github/workflows/validate.yaml` does not set `ignore`.
-4. Create a GitHub release of that commit. Name it `v` plus the manifest version (for example `v0.2.0`; the release history includes `v0.1.2`) and target `main`.
+1. Set `version` in `custom_components/lite_resources/manifest.json` to the new version. Give `CHANGELOG.md` an entry for that version, and leave its section `Unreleased` empty.
+2. Run `python scripts/validate.py`. When each check passes, commit, and push the commit to `main`.
+3. Run `python scripts/release_notes.py` with the tag, such as `python scripts/release_notes.py v0.3.9`. It prints the notes of the release, or it says why the tag is wrong.
+4. Make the tag on that commit, and push it:
 
-A submission to the HACS default repository asks for that release to be created after those actions have succeeded, and for links to the release and to the successful runs. v0.1.1 was published at 2026-11-07 11:39:18 GMT. Validate run [42369085242](https://github.com/evski/ha-lite-resources/actions/runs/42369085242) on the same commit finished hassfest at 11:39:40 GMT and HACS validation at 11:39:57 GMT.
+```bash
+git tag v0.3.9
+git push origin v0.3.9
+```
+
+The workflow `Release` then runs the same script on GitHub and makes the release, with the changelog entry of the version as its notes. A tag that the script refuses gets no release.
+
+If a run fails, correct its cause on `main`. Then start the workflow `Release` by hand in the `Actions` tab, and give it the tag. In a fork, GitHub runs no workflow until the fork's owner enables GitHub Actions in the `Actions` tab.
+
+Never move a tag that has a release, because Home Assistant installs by the tag. For a correction, make a new version.
 
 ## License
 

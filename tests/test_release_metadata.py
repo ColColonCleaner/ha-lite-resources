@@ -63,14 +63,73 @@ class ReleaseMetadataTest(unittest.TestCase):
         self.assertTrue(icon.is_file())
         self.assertGreater(icon.stat().st_size, 0)
 
-    def test_readme_says_release_follows_validation(self) -> None:
-        """Release steps tell a maintainer to publish after Validate succeeds."""
-        readme = (ROOT / "README.md").read_text()
-        self.assertIn("## Releasing", readme)
-        self.assertIn(
-            "after the Validate workflow on that commit has succeeded", readme
+    def test_readme_gives_the_release_steps(self) -> None:
+        """A release follows the local validation and the check of its tag."""
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        steps = readme.split("## Releasing")[1].split("## License")[0]
+        validate = steps.index("python scripts/validate.py")
+        check = steps.index("python scripts/release_notes.py")
+        push = steps.index("git push origin v")
+        self.assertLess(validate, check)
+        self.assertLess(check, push)
+
+    def _release_workflow(self) -> str:
+        """Return the Release workflow without its comment lines.
+
+        A comment that names a step must not count as that step.
+        """
+        text = (ROOT / ".github" / "workflows" / "release.yaml").read_text(
+            encoding="utf-8"
         )
-        self.assertIn("42369085242", readme)
+        return "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+
+    def test_release_workflow_runs_the_script_for_a_pushed_tag(self) -> None:
+        """The workflow makes a release only through the script that checks the tag."""
+        workflow = self._release_workflow()
+        self.assertRegex(workflow, r'push:\s*\n\s*tags:\s*\n\s*- "v\*"')
+        self.assertRegex(workflow, r"permissions:\s*\n\s*contents: write\n")
+        self.assertIn('python3 scripts/release_notes.py "$TAG" --publish', workflow)
+        self.assertEqual(workflow.count("--publish"), 1)
+
+    def test_release_workflow_takes_a_tag_for_a_manual_run(self) -> None:
+        """A manual run names its tag, because its own ref is a branch."""
+        workflow = self._release_workflow()
+        self.assertRegex(
+            workflow, r"workflow_dispatch:\s*\n\s*inputs:\s*\n\s*tag:\s*\n"
+        )
+        self.assertIn("required: true", workflow)
+        self.assertIn("TAG: ${{ inputs.tag || github.ref_name }}", workflow)
+
+    def test_release_workflow_stops_for_a_name_with_no_tag(self) -> None:
+        """The request would make a tag for such a name, so the job stops before it."""
+        workflow = self._release_workflow()
+        checkout = workflow.index("ref: refs/tags/${{ env.TAG }}")
+        guard = workflow.index(
+            'test "$(git rev-parse HEAD)" = '
+            '"$(git rev-parse --verify --quiet "refs/tags/$TAG^{commit}")"'
+        )
+        publish = workflow.index("--publish")
+        self.assertLess(checkout, guard)
+        self.assertLess(guard, publish)
+
+    def test_release_workflow_limits_the_token(self) -> None:
+        """One step reads the token, and no command holds an expression."""
+        workflow = self._release_workflow()
+        self.assertEqual(workflow.count("secrets."), 1)
+        self.assertNotIn("github.token", workflow)
+        publish = workflow.index("--publish")
+        self.assertGreater(workflow.index("secrets.GITHUB_TOKEN"), publish)
+        self.assertIn("persist-credentials: false", workflow)
+        # The action of a job with a write token is named by a commit, never by a tag.
+        actions = [line for line in workflow.splitlines() if "uses:" in line]
+        self.assertEqual(len(actions), 1)
+        self.assertRegex(actions[0], r"uses: actions/checkout@[0-9a-f]{40}$")
+        commands = [line for line in workflow.splitlines() if "run:" in line]
+        self.assertEqual(len(commands), 2)
+        for command in commands:
+            self.assertNotIn("${{", command)
 
     def test_single_integration_package(self) -> None:
         """HACS manages one directory under custom_components."""

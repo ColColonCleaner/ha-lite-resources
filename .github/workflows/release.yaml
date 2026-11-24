@@ -1,0 +1,50 @@
+name: Release
+
+# Makes the GitHub release of a version tag, with the changelog entry of the version as its
+# notes. The script scripts/release_notes.py holds each check and the request, so that the
+# unit tests cover them. README.md, section Releasing, gives the steps before the tag.
+on:
+  push:
+    tags:
+      - "v*"
+  # A manual run makes the release of a tag that exists and has no release, such as a tag
+  # whose run failed. GitHub starts a manual run only from a workflow file on the default
+  # branch.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "A tag that exists, such as v0.3.9"
+        required: true
+        type: string
+
+# A release needs write access to the contents. Each permission that this list does not
+# name is "none".
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # A pushed tag gives its own name. In a manual run, the ref is the branch that got the
+      # run, so the input names the tag. The steps read the name from this variable and
+      # never as an expression in a command.
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      # The checkout names the tag ref, so a name with no tag stops the job here. The
+      # "Create a release" request makes a new tag on the default branch for a tag name
+      # that does not exist, and the job must never reach the request with such a name.
+      # The action is named by the commit of its tag v7, because this job holds a token
+      # with write access and a commit cannot move. The token does not stay in the
+      # checkout's git configuration.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      # Stops the job unless the checked out commit is the commit of the tag.
+      - run: test "$(git rev-parse HEAD)" = "$(git rev-parse --verify --quiet "refs/tags/$TAG^{commit}")"
+      # The script refuses a tag that is not "v" plus the manifest's version at this commit,
+      # and a changelog with no entry for the version. Only this step gets the token.
+      - run: python3 scripts/release_notes.py "$TAG" --publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
