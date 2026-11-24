@@ -1,6 +1,6 @@
-"""Resources that the scan of a file did not see, and files that it could not read.
+"""Resources that the file scan did not see, and files that it could not read.
 
-Each case comes from a finding of a review of the resource scan.
+Each case comes from a review finding on the resource scan.
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ FileCache = _resolver.FileCache
 names_in_javascript = _resolver.names_in_javascript
 
 # A bundle that registers its elements only through the minified decorator of Lit. The
-# scan sees the element of the file name, and it does not see the second element.
+# scan sees the file name's element, and it does not see the second element.
 LAYOUT_CARD_JS = b"""
 const t=t=>(e,o)=>{void 0!==o?o.addInitializer(()=>{customElements.define(t,e)}):customElements.define(t,e)};
 let Grid=class extends s{};Grid=e([t("grid-layout")],Grid);
 let Card=class extends s{};Card=e([t("layout-card")],Card);
 """
-# A file that names a card of another file, and registers its own element.
+# A file that names another file's card, and registers its own element.
 MENTION_JS = b"""
 const OTHER = ["grid-layout", "missing-card"];
 customElements.define("helper-row", class extends HTMLElement {});
@@ -79,7 +79,7 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/hacsfiles/other-kit/other-kit.js", summary["included"])
 
     async def test_key_that_ends_in_type_is_no_registration(self) -> None:
-        # The option of a card, such as layout_type, names a type and registers nothing.
+        # A card's option, such as layout_type, names a type and registers nothing.
         _write(
             self.root,
             "editor-kit/editor-kit.js",
@@ -113,7 +113,7 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             {"type": "custom:grid-layout"},
             always_exclude=["/hacsfiles/layout-card/layout-card.js"],
         )
-        # The excluded file is the only one that can hide the registration of the type,
+        # The excluded file is the only one that can hide the type's registration,
         # so no other file is sent for it, and the type has no provider.
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["excluded"])
         self.assertIn("/hacsfiles/helper-row/helper-row.js", summary["excluded"])
@@ -166,7 +166,7 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["excluded"])
 
     async def test_camera_with_a_webrtc_card_key_keeps_the_webrtc_script(self) -> None:
-        # The live provider "auto" of the Advanced Camera Card takes webrtc-card for it.
+        # The Advanced Camera Card's live provider "auto" takes webrtc-card for it.
         card = {
             "type": "custom:advanced-camera-card",
             "cameras": [{"webrtc_card": {"entity": "camera.door"}}],

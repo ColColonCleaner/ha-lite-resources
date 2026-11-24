@@ -1,7 +1,7 @@
 """Entities that a card finds by itself: the area card and the scheduler card.
 
 The cases come from a kitchen tablet. Its dashboard holds area cards for two doors and a
-scheduler card. No card of that dashboard names the lights, the motion sensors or the
+scheduler card. None of that dashboard's cards names the lights, the motion sensors or the
 schedules that those cards show.
 """
 
@@ -104,9 +104,9 @@ class AreaCardTest(unittest.TestCase):
         self.assertTrue(shown("light.side_door"))
         self.assertTrue(shown("sensor.side_temp", device_class="temperature"))
         self.assertTrue(shown("binary_sensor.doorbell_side_motion", device_class="motion"))
-        # A climate entity gives the temperature of an area from an attribute.
+        # A climate entity gives an area's temperature from an attribute.
         self.assertTrue(shown("climate.side_room"))
-        # Not in the lists of the card.
+        # Not in the card's lists.
         self.assertFalse(shown("sensor.side_power", device_class="power"))
         self.assertFalse(shown("binary_sensor.side_door_open", device_class="door"))
         self.assertFalse(shown("switch.side_door"))
@@ -133,7 +133,7 @@ class AreaCardTest(unittest.TestCase):
 
 
 class CardPlatformTest(unittest.TestCase):
-    """A custom card that shows the entities of one integration."""
+    """A custom card that shows one integration's entities."""
 
     def test_scheduler_card_names_the_scheduler_integration(self) -> None:
         self.assertEqual(
@@ -214,7 +214,7 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
             "d-child": SimpleNamespace(area_id=None, parent_device_id="d-parent"),
         }
         areas = {
-            # The area names the sensor of another area for its temperature.
+            # The area names another area's sensor for its temperature.
             "side_door": SimpleNamespace(temperature_entity_id="sensor.temp_outside", humidity_entity_id=None),
             "backyard": SimpleNamespace(temperature_entity_id=None, humidity_entity_id=None),
         }
@@ -251,14 +251,14 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
                 "sun.sun",
                 # Named by a card.
                 "lock.side_door",
-                # The area card of the side door: its camera, its light control, its motion
+                # The side door's area card: its camera, its light control, its motion
                 # alert, and the temperature entity that the area names.
                 "camera.side_door",
                 "light.side_door",
                 "light.porch",
                 "binary_sensor.doorbell_side_motion",
                 "sensor.temp_outside",
-                # The area card of the backyard: its occupancy alert.
+                # The backyard's area card: its occupancy alert.
                 "binary_sensor.backyard_person_occupancy",
                 # The scheduler card: the schedule, and the entity that the schedule controls.
                 "switch.schedule_1",
@@ -272,7 +272,7 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
 
 
 class _Services:
-    """The actions of the home: light.turn_on and no other."""
+    """The home's actions: light.turn_on and no other."""
 
     def has_service(self, domain: str, service: str) -> bool:
         return (domain, service) == ("light", "turn_on")
@@ -281,9 +281,9 @@ class _Services:
 class StartupTest(unittest.IsolatedAsyncioTestCase):
     """A page that connects while Home Assistant starts.
 
-    The registries are complete at that time, and many entities have no state yet. The
-    cameras of one home got their first state 27 seconds after the start, later than the
-    page of a tablet connected.
+    The registries are complete at that time, and many entities have no state yet. One
+    home's cameras got their first state 27 seconds after the start, later than a tablet's
+    page connected.
     """
 
     async def asyncSetUp(self) -> None:
@@ -291,7 +291,7 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
             _entry("lock.side_door", area_id="side_door"),
             # No camera has a state yet, so the state machine does not hold the domain.
             _entry("camera.side_door", area_id="side_door"),
-            # The device class of an entity with no state comes from the registry.
+            # An entity with no state takes its device class from the registry.
             _entry("binary_sensor.doorbell_side_motion", area_id="side_door",
                    original_device_class="motion"),
             _entry("binary_sensor.side_door_open", area_id="side_door",
@@ -327,7 +327,7 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("binary_sensor.doorbell_side_motion", found)
         self.assertIn("light.side_door", found)
         self.assertNotIn("binary_sensor.side_door_open", found)
-        # The name of an action is no entity, so the subscription does not ask for it.
+        # An action's name is no entity, so the subscription does not ask for it.
         self.assertNotIn("light.turn_on", found)
 
     async def test_list_of_the_entities_holds_only_those_with_a_state(self) -> None:

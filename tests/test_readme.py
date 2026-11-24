@@ -1,7 +1,7 @@
-"""The instructions of the README are complete.
+"""The README's instructions are complete.
 
-An instruction that names an action also says where that action is. A reader of an
-earlier version found "select Add group" with no place.
+An instruction that names an action also says where that action is. An earlier version's
+reader found "select Add group" with no place.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from support import ROOT
 
 
 class ReadmeTest(unittest.TestCase):
-    """The setup instructions and the pictures of the README."""
+    """The README's setup instructions and pictures."""
 
     def setUp(self) -> None:
         self.readme = (ROOT / "README.md").read_text(encoding="utf-8")

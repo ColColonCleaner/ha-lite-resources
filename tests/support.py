@@ -1,6 +1,6 @@
-"""Shared helpers of the tests.
+"""The tests' shared helpers.
 
-`load` loads one module of the integration without a Home Assistant checkout.
+`load` loads one of the integration's modules without a Home Assistant checkout.
 `install_homeassistant_stubs` puts stand-ins for the Home Assistant modules that the
 integration imports into `sys.modules`.
 """
@@ -45,7 +45,7 @@ def _module(name: str) -> types.ModuleType:
 
 
 def _default(module: types.ModuleType, name: str, value: Any) -> None:
-    """Set an attribute of a stand-in module only when another test file did not set it."""
+    """Set a stand-in module's attribute only when another test file did not set it."""
     if not hasattr(module, name):
         setattr(module, name, value)
 
@@ -120,8 +120,8 @@ def _async_register_admin_service(
     """Stand-in for helpers.service.async_register_admin_service.
 
     As in Home Assistant, the registered function is a wrapper. It refuses a call whose
-    context names a user that is no administrator, and it passes the answer of the
-    function on. A call with no user in its context comes from Home Assistant itself.
+    context names a user that is no administrator, and it passes the function's answer
+    on. A call with no user in its context comes from Home Assistant itself.
     """
 
     async def admin_handler(call):
@@ -164,7 +164,7 @@ def _async_at_started(hass, at_start_cb):
 def _effective_area_id(hass, device) -> str | None:
     """Stand-in for device_registry.async_get_effective_area_id.
 
-    A child device with no area of its own has the area of its parent device.
+    A child device with no area of its own has its parent device's area.
     """
     if device.area_id:
         return device.area_id
@@ -174,7 +174,7 @@ def _effective_area_id(hass, device) -> str | None:
 
 
 def install_homeassistant_stubs() -> None:
-    """Add each missing stand-in. The order of the test files does not matter."""
+    """Add each missing stand-in. The test files' order does not matter."""
     try:
         import voluptuous  # noqa: F401
     except ImportError:
@@ -199,7 +199,7 @@ def install_homeassistant_stubs() -> None:
     if not hasattr(lovelace_const, "ConfigNotFound"):
 
         class ConfigNotFound(exceptions.HomeAssistantError):
-            """Stand-in for the error of a dashboard with no stored configuration."""
+            """Stand-in for the error that a dashboard with no stored configuration raises."""
 
         lovelace_const.ConfigNotFound = ConfigNotFound
     if not hasattr(exceptions, "ConfigEntryNotReady"):
@@ -244,7 +244,7 @@ def install_homeassistant_stubs() -> None:
         _convert_include_exclude_filter,
     )
 
-    # Each registry of a test is an attribute of its stand-in for hass.
+    # Each of a test's registries is an attribute of its stand-in for hass.
     for name in ("entity_registry", "device_registry", "area_registry"):
         _default(
             _module(f"homeassistant.helpers.{name}"),

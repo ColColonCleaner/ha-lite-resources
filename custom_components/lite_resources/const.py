@@ -20,8 +20,8 @@ REGISTRY_EVENTS = (
 # The registries change in bursts. The open pages get one update this number of seconds
 # after the first change of a burst.
 REGISTRY_REFRESH_DELAY = 10
-# The longest time in seconds for one entity scan of a group. The changes of the open
-# pages run one after the other, so a scan with no end would hold each later change.
+# The longest time in seconds for one group's entity scan. The open pages' changes run
+# one after the other, so a scan with no end would hold each later change.
 SCAN_TIMEOUT = 30
 
 CONF_USERS = "users"
@@ -42,9 +42,9 @@ BASE_ENTITIES = ("sun.sun", "zone.home")
 # whose url_path is None.
 DEFAULT_DASHBOARD = "__default__"
 
-# The URL path of the dashboard that Home Assistant 2026.11 shows as the default dashboard
-# when it exists. The lovelace commands of Home Assistant take it for a request with no
-# URL path, before the dashboard with the key None.
+# Home Assistant 2026.11 shows the dashboard with this URL path as the default dashboard
+# when it exists. Home Assistant's lovelace commands take it for a request with no URL
+# path, before the dashboard with the key None.
 LOVELACE_DASHBOARD = "lovelace"
 
 # The websocket command the frontend uses to fetch the resource list.
@@ -62,25 +62,25 @@ KEY_HINTS: dict[str, str] = {
 }
 
 # Dashboard values that only work when another resource is loaded. The card that reads
-# the value makes an element of that resource itself, so no "custom:" type names it.
+# the value makes one of that resource's elements itself, so no "custom:" type names it.
 # value in dashboard JSON -> substring of the resource URL that provides it.
 VALUE_HINTS: dict[str, str] = {
     # Advanced Camera Card: the live provider "webrtc-card" shows the stream in the
-    # <webrtc-camera> element of the WebRTC Camera integration, and waits for it.
+    # WebRTC Camera integration's <webrtc-camera> element, and waits for it.
     "webrtc-card": "webrtc-camera",
 }
 
-# Custom cards that show the entities of one integration. The card gets the list from the
-# integration, and it reads the state of each entity from the state stream.
+# Custom cards that show one integration's entities. The card gets the list from the
+# integration, and it reads each entity's state from the state stream.
 # card type -> the integration whose entities the card shows.
 CARD_PLATFORMS: dict[str, str] = {
-    # Scheduler card: a schedule is a switch of the scheduler integration. The card shows
-    # an empty row for a schedule whose switch has no state.
+    # Scheduler card: a schedule is one of the scheduler integration's switches. The card
+    # shows an empty row for a schedule whose switch has no state.
     "scheduler-card": "scheduler",
 }
 
 # State attributes that name other entities, which a card shows with the entity itself.
-# integration of the entity (None: any) -> the attribute.
+# the entity's integration (None: any) -> the attribute.
 MEMBER_ATTRIBUTES: dict[str | None, str] = {
     # Light groups, old-style groups and other entities with members.
     None: "entity_id",

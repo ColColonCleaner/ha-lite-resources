@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Lite Resources",
-        "description": "Set up Lite Resources. After this step, open the page of the integration: Settings, Devices & services, Lite Resources. There, select **Add group** in the upper-right corner, or in the three-dot menu of the entry. Add one group for each set of users (for example the logins of the wall panels of one room). Each group has its own dashboards. Everyone outside the groups keeps the normal behaviour."
+        "description": "Set up Lite Resources. After this step, open the integration's page: Settings, Devices & services, Lite Resources. There, select **Add group** in the upper-right corner, or in the entry's three-dot menu. Add one group for each set of users (for example the logins of one room's wall panels). Each group has its own dashboards. Everyone outside the groups keeps the normal behaviour."
       }
     },
     "abort": {
@@ -20,7 +20,7 @@
       "step": {
         "user": {
           "title": "Add a group of lite users",
-          "description": "The users of a group load only the custom cards their dashboards use, and can receive live updates only for the entities on those dashboards. Both are worked out from the dashboards, and follow a dashboard when it is changed.",
+          "description": "A group's users load only the custom cards their dashboards use, and can receive live updates only for the entities on those dashboards. Both are worked out from the dashboards, and follow a dashboard when it is changed.",
           "data": {
             "name": "Group name",
             "users": "Lite users",
@@ -34,7 +34,7 @@
           "data_description": {
             "name": "For example 'Workshop kiosks'.",
             "users": "These users get the reduced resource list and state stream on every device they log in on. A user can be in one group only.",
-            "dashboards": "Every dashboard the users of this group open. The resources and the entities of these dashboards are found automatically.",
+            "dashboards": "Every dashboard this group's users open. These dashboards' resources and entities are found automatically.",
             "filter_states": "Stream live updates only for entities on their dashboards (plus group members). Big CPU saving on slow panels; other entities show as unavailable for these users.",
             "extra_entities": "Entities to keep streaming even though they aren't on the dashboards.",
             "include_unscannable": "Resources served by integrations or other sites can't be read; keep them loaded (recommended). A file named after a card these dashboards don't use is still skipped.",
@@ -44,7 +44,7 @@
         },
         "reconfigure": {
           "title": "Change a group of lite users",
-          "description": "Open pages of the users of this group get the new entities at once. A page loads other custom cards when it is loaded again. To rename or delete the group, use the three-dot menu at the right of its row on the page of the integration.",
+          "description": "The open pages of this group's users get the new entities at once. A page loads other custom cards when it is loaded again. To rename or delete the group, use the three-dot menu at the right of its row on the integration's page.",
           "data": {
             "name": "Group name",
             "users": "Lite users",
@@ -58,7 +58,7 @@
           "data_description": {
             "name": "For example 'Workshop kiosks'.",
             "users": "These users get the reduced resource list and state stream on every device they log in on. A user can be in one group only.",
-            "dashboards": "Every dashboard the users of this group open. The resources and the entities of these dashboards are found automatically.",
+            "dashboards": "Every dashboard this group's users open. These dashboards' resources and entities are found automatically.",
             "filter_states": "Stream live updates only for entities on their dashboards (plus group members). Big CPU saving on slow panels; other entities show as unavailable for these users.",
             "extra_entities": "Entities to keep streaming even though they aren't on the dashboards.",
             "include_unscannable": "Resources served by integrations or other sites can't be read; keep them loaded (recommended). A file named after a card these dashboards don't use is still skipped.",
@@ -78,7 +78,7 @@
   "services": {
     "preview": {
       "name": "Preview",
-      "description": "For administrators. Show, for each group, which resources its users get and which are skipped, any card types no local resource was found for, and (if state filtering is on) which entities they receive. It also says why the states or the resources of a group are not narrowed."
+      "description": "For administrators. Show, for each group, which resources its users get and which are skipped, any card types no local resource was found for, and (if state filtering is on) which entities they receive. It also says why a group's states or resources are not narrowed."
     }
   }
 }

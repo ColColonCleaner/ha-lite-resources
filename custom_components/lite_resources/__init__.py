@@ -1,14 +1,14 @@
 """Lite Resources: make wall panels and other low-powered devices do less work.
 
-Lite users are set up in groups (for example the logins of the wall panels of one room).
-For the users of a group:
+Lite users are set up in groups (for example the logins of one room's wall panels).
+For a group's users:
 - Resources: Home Assistant's frontend fetches the full list of dashboard resources (custom
   cards and mods) with the "lovelace/resources" websocket command and loads all of them. This
-  integration answers that command with only the resources the dashboards of the group use.
+  integration answers that command with only the resources the group's dashboards use.
 - States (optional): the frontend streams every entity's state with "subscribe_entities". This
-  integration limits that stream to the entities the dashboards of the group show.
-Both are worked out from the dashboards at each request. When a dashboard of a group changes,
-the open pages of the group get the new entity list at once.
+  integration limits that stream to the entities the group's dashboards show.
+Both are worked out from the dashboards at each request. When one of a group's dashboards
+changes, the group's open pages get the new entity list at once.
 Everyone else gets Home Assistant's normal behaviour. Nothing is changed on disk.
 """
 
@@ -70,17 +70,17 @@ from .resolver import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# The title of the group that the migration makes from the options of a single-group version.
+# The title of the group that the migration makes from a single-group version's options.
 MIGRATED_GROUP_TITLE = "Lite users"
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Move the users and dashboards of a single-group version into one group."""
+    """Move a single-group version's users and dashboards into one group."""
     if entry.version == 1:
         data = legacy_group_data(entry.options)
         if data is not None and not groups_from_subentries(entry.subentries):
-            # A single-group version with no such option did not narrow the states. The
-            # form of a group shows a missing option as on, so the group states it.
+            # A single-group version with no such option did not narrow the states. A
+            # group's form shows a missing option as on, so the group states it.
             data.setdefault(CONF_FILTER_STATES, False)
             hass.config_entries.async_add_subentry(
                 entry,
@@ -97,7 +97,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Take over the resources and states commands for the users of each group."""
+    """Take over the resources and states commands for each group's users."""
     handlers = hass.data.get(websocket_api.DOMAIN, {})
     original = handlers.get(WS_RESOURCES)
     original_sub = handlers.get(WS_SUBSCRIBE_ENTITIES)
@@ -107,7 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sub_handler, sub_schema = original_sub
     cache = FileCache()
     # The keys of the warnings that the log already holds. A warning that repeats at each
-    # request of each page hides a new one.
+    # request from each page hides a new one.
     warned: set[Any] = set()
 
     def warn_once(key: Any, message: str, *args: Any) -> None:
@@ -115,12 +115,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             warned.add(key)
             _LOGGER.warning(message, *args)
 
-    # "unloaded" is True after the unload of this setup. A task of this setup that still
+    # "unloaded" is True after this setup's unload. One of this setup's tasks that still
     # waits at that time must change no page, and its handlers pass each message on.
     setup_state = {"unloaded": False}
 
     def groups() -> list[Group]:
-        # Read at each request, so a change of a group needs no reload.
+        # Read at each request, so a change to a group needs no reload.
         return groups_from_subentries(entry.subentries)
 
     def check_groups() -> None:
@@ -139,13 +139,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return group_for_user(groups(), user.id if user is not None else None)
 
     async def entities_of(group: Group) -> set[str] | None:
-        """Return the entities for the state subscription of a group.
+        """Return the entities for a group's state subscription.
 
-        None means that the dashboards of the group do not say which entities a page
-        needs, so the states of the group are not narrowed. The set holds also each name
-        with no state now, so that a page gets an entity whose first state comes after the
-        page connected. An error of the scan is raised, and so is a scan that takes longer
-        than SCAN_TIMEOUT seconds, such as the load of a YAML dashboard from a dead share.
+        None means that the group's dashboards do not say which entities a page needs, so
+        the group's states are not narrowed. The set holds also each name with no state
+        now, so that a page gets an entity whose first state comes after the page
+        connected. A scan error is raised, and so is a scan that takes longer than
+        SCAN_TIMEOUT seconds, such as a YAML dashboard's load from a dead share.
         """
         try:
             async with asyncio.timeout(SCAN_TIMEOUT):
@@ -229,7 +229,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # The handler reads keys that only its schema adds to a message.
         sub_schema if callable(sub_schema) else None,
     )
-    # One change of the open pages at a time. Two changes that overlap can leave a page
+    # One change to the open pages at a time. Two changes that overlap can leave a page
     # with the older of two entity sets.
     change_lock = asyncio.Lock()
 
@@ -262,8 +262,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async def narrowed() -> None:
             try:
-                # Under the lock of the changes. A page that starts during an update of
-                # the open pages then gets the entity set of after that update.
+                # Under the change lock. A page that starts during an update of the open
+                # pages then gets the entity set from after that update.
                 async with change_lock:
                     try:
                         entities = await entities_of(group)
@@ -280,7 +280,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         connection.send_result(msg_id)
                         return
                     del connection.subscriptions[msg_id]
-                    # After the unload of this setup, the page gets what Home Assistant gives.
+                    # After this setup's unload, the page gets what Home Assistant gives.
                     if entities and not setup_state["unloaded"]:
                         try:
                             live.start(connection, msg, entities)
@@ -317,13 +317,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def group_sets(
         current: list[Group], sets: dict[str, set[str] | None], failed: set[str], group: Group
     ) -> bool:
-        """Put the entity set of a group into `sets`. False when its scan failed."""
+        """Put a group's entity set into `sets`. False when its scan failed."""
         if group.group_id in failed:
             return False
         if group.group_id not in sets:
             try:
                 sets[group.group_id] = await entities_of(group)
-            except Exception:  # the pages of the group keep what they have
+            except Exception:  # the group's pages keep what they have
                 _LOGGER.exception(
                     "Working out the entities of group %s failed; its open pages "
                     "keep their entities",
@@ -334,11 +334,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return True
 
     def readable_entity_ids(user: Any) -> list[str]:
-        """Return each entity that the user can read, as the handler of Home Assistant does.
+        """Return each entity that the user can read, as Home Assistant's handler does.
 
-        A page holds only those entities, so only they go into the removal list of an
-        adoption. A list of all entities would give a user with a narrow policy the name
-        of each entity that the policy hides.
+        A page holds only those entities, so only they go into an adoption's removal
+        list. A list of all entities would give a user with a narrow policy the names
+        that the policy hides.
         """
         entity_ids = hass.states.async_entity_ids()
         permissions = user.permissions
@@ -351,7 +351,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ]
 
     async def refresh_live(only: set[str] | None = None) -> None:
-        """Give each open page of a lite user the entity set of its group as it is now.
+        """Give each of a lite user's open pages its group's entity set as it is now.
 
         `only` limits the work to the pages of the groups with these IDs.
         """
@@ -390,13 +390,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             len(entities),
                         )
                 except Exception:  # the other pages still get their update
-                    _LOGGER.exception("The update of an open page of a lite user failed")
+                    _LOGGER.exception("The update of a lite user's open page failed")
 
     async def adopt_unfiltered() -> None:
-        """Narrow each state subscription for all entities that a page of a lite user holds.
+        """Narrow each state subscription for all entities that a lite user's page holds.
 
-        After a restart of Home Assistant, a page connects again before this setup runs.
-        The handler of Home Assistant then answers its state subscription, with every
+        After a Home Assistant restart, a page connects again before this setup runs.
+        Home Assistant's handler then answers its state subscription, with every
         entity. A user that joins a group holds such a subscription too.
         """
         async with change_lock:
@@ -410,7 +410,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if unreadable:
                 warn_once(
                     "unreadable listeners",
-                    "%d state listener(s) of Home Assistant have another layout than this "
+                    "%d of Home Assistant's state listeners have another layout than this "
                     "integration expects. A panel that connects before this setup, such "
                     "as after a restart, can keep all states until it connects again",
                     unreadable,
@@ -438,17 +438,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             len(entities),
                         )
                 except Exception:  # the other pages still get their change
-                    _LOGGER.exception("The narrowing of an open page of a lite user failed")
+                    _LOGGER.exception("The narrowing of a lite user's open page failed")
 
     async def update_pages(only: set[str] | None = None) -> None:
-        """Bring each open page of a lite user in step with its group and its dashboards."""
+        """Bring each of a lite user's open pages in step with its group and its dashboards."""
         await refresh_live(only)
         # A page that got all states, because its dashboards did not say what it needs,
         # is narrowed again when they do.
         await adopt_unfiltered()
 
-    # The updates that wait for the one that runs: the IDs of their groups, or "all" for
-    # an update of each group. Many events close together then give one more update, and
+    # The updates that wait for the one that runs: their groups' IDs, or "all" for an
+    # update of each group. Many events close together then give one more update, and
     # not one update for each event.
     wanted_updates: dict[str, Any] = {"all": False, "groups": set(), "task": None}
 
@@ -461,7 +461,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     def request_update(only: set[str] | None = None) -> None:
-        """Ask for an update of the open pages of these groups, or of each group."""
+        """Ask for an update of these groups' open pages, or of each group's."""
         if setup_state["unloaded"]:
             return
         if only is None:
@@ -476,11 +476,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def dashboard_updated(event: Event) -> None:
         """A dashboard changed: update the open pages of the groups that show it."""
         if "url_path" not in event.data:
-            # The event names no dashboard. None is the URL path of the default dashboard.
+            # The event names no dashboard. None is the default dashboard's URL path.
             return
         url_path = event.data["url_path"]
         if is_loading(url_path):
-            # The load of a YAML dashboard by a scan of this integration fired the event.
+            # This integration's scan loaded a YAML dashboard, and that load fired the event.
             # That scan has the new configuration. A new scan for it would load the file
             # again, and a file that Home Assistant does not cache would fire with no end.
             return
@@ -488,7 +488,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if affected:
             request_update({group.group_id for group in affected})
 
-    # The handle of the delayed update after a change of a registry, while it waits.
+    # The delayed update's handle after a change to a registry, while it waits.
     pending_update: list[Any] = []
 
     @callback
@@ -514,7 +514,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await update_pages()
 
     async def started(hass: HomeAssistant) -> None:
-        """The start of Home Assistant is complete: update the pages that connected before.
+        """Home Assistant's start is complete: update the pages that connected before.
 
         Each integration had its chance to load, so a group entity now names its members.
         """
@@ -552,15 +552,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             response.append(item)
         return {"groups": response, "open_pages_with_narrowed_states": len(live)}
 
-    # The answer names each user and each entity of the dashboards, so only an
+    # The answer names each user and each entity in the dashboards, so only an
     # administrator can call the action.
     async_register_admin_service(
         hass, DOMAIN, SERVICE_PREVIEW, preview, supports_response=SupportsResponse.ONLY
     )
 
     def restore() -> None:
-        # From here on, a task of this setup that still waits changes no page, and a
-        # handler of this setup that another integration still calls passes each message on.
+        # From here on, one of this setup's tasks that still waits changes no page, and one
+        # of its handlers that another integration still calls passes each message on.
         setup_state["unloaded"] = True
         commands = hass.data[websocket_api.DOMAIN]
         for command, own, original_pair in (
@@ -573,7 +573,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.warning(
                     "Another integration replaced the handler of %s after this one. "
                     "That handler stays in place. A call that it passes to this "
-                    "integration goes on to the handler of Home Assistant",
+                    "integration goes on to Home Assistant's handler",
                     command,
                 )
         hass.services.async_remove(DOMAIN, SERVICE_PREVIEW)
@@ -607,7 +607,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     fault = adoption_fault(hass.bus)
     if fault:
         _LOGGER.warning(
-            "This version of Home Assistant differs from the one that this integration "
+            "This Home Assistant version differs from the one that this integration "
             "expects: %s. A panel that connects before this setup, such as after a "
             "restart, keeps all states until it connects again",
             fault,

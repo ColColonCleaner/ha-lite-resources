@@ -1,4 +1,4 @@
-"""The form of a group of lite users: its options, its defaults and its checks."""
+"""The form for a group of lite users: its options, its defaults and its checks."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ install_homeassistant_stubs()
 
 
 class _Flow:
-    """Stand-in for the flow base classes of Home Assistant: each result is a dict."""
+    """Stand-in for Home Assistant's flow base classes: each result is a dict."""
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__()
@@ -89,7 +89,7 @@ def _hass() -> SimpleNamespace:
 
 
 async def _fields(current: dict, new_group: bool) -> dict:
-    """Return each field of the form as (default, values of its options)."""
+    """Return each of the form's fields as (default, its option values)."""
     schema = await _flow._async_group_schema(_hass(), current, new_group)
     fields = {}
     for key, selector in schema.schema.items():
@@ -107,7 +107,7 @@ class GroupFormTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_stored_value_that_is_no_option_now_stays_in_the_form(self) -> None:
         # A select field refuses a value outside its options. So a deleted user, a deleted
-        # dashboard and a resource URL of an older version must stay among them.
+        # dashboard and an older version's resource URL must stay among them.
         current = {
             "users": ["u-w1", "u-deleted"],
             "dashboards": ["dashboard-old"],
@@ -190,7 +190,7 @@ class GroupChecksTest(unittest.TestCase):
 
 
 class GroupStepsTest(unittest.IsolatedAsyncioTestCase):
-    """The two steps of the group form: add a group, and change one."""
+    """The group form's two steps: add a group, and change one."""
 
     def setUp(self) -> None:
         self.workshop = ConfigSubentry(
@@ -214,7 +214,7 @@ class GroupStepsTest(unittest.IsolatedAsyncioTestCase):
         result = await self.flow.async_step_user(dict(values))
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["title"], "Kitchen")
-        # The name is the title of the group, and no part of its data.
+        # The name is the group's title, and no part of its data.
         self.assertEqual(result["data"], {"users": ["u-k"], "dashboards": ["dashboard-workshop"]})
 
     async def test_input_with_an_error_shows_the_form_again(self) -> None:

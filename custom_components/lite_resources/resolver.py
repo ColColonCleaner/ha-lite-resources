@@ -47,8 +47,8 @@ _LOGGER = logging.getLogger(__name__)
 # A dashboard string that is "custom:xxx" as a whole (cards, rows, badges, features, and
 # cards nested inside pop-ups, stacks, sections or other cards' options).
 _CUSTOM_TYPE = re.compile(r"custom:([A-Za-z0-9_.\-]+)")
-# "custom:xxx" inside a longer string, as the value of a key "type", such as a template
-# that returns a card. The same words in plain text, with no such key, name no card.
+# "custom:xxx" inside a longer string, after a key "type", such as a template that
+# returns a card. The same words in plain text, with no such key, name no card.
 _CUSTOM_TYPE_INSIDE = re.compile(
     r"""type["']?\s*[:=]\s*["']custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)"""
 )
@@ -85,8 +85,8 @@ _CONCAT_ANY = re.compile(
 # A registration whose name is no quoted text, such as the call inside a minified
 # decorator. The scan cannot see which names such a file registers.
 _DEFINE_OPAQUE = re.compile(rb"""customElements\.define\(\s*[A-Za-z_$]""")
-# The key "type" as a whole word. A key that ends in "type", such as layout_type, is the
-# option of a card and no registration.
+# The key "type" as a whole word. A key that ends in "type", such as layout_type, is a
+# card's option and no registration.
 _CUSTOM_CARD_TYPE = re.compile(
     rb"""(?<![A-Za-z0-9_$])type\s*:\s*["']([a-z][a-z0-9_]*(?:-[a-z0-9_]+)+)["']"""
 )
@@ -125,14 +125,14 @@ LOADING: Counter[Any] = Counter()
 
 
 def _warn_once(key: Any, message: str, *args: Any) -> None:
-    """Log a warning one time. A warning at each request of each page hides a new one."""
+    """Log a warning one time. A warning at each request from each page hides a new one."""
     if key not in _WARNED:
         _WARNED.add(key)
         _LOGGER.warning(message, *args)
 
 
 class CannotNarrow(Exception):
-    """The dashboards of a group do not say what a page of the group needs.
+    """A group's dashboards do not say what one of the group's pages needs.
 
     The caller then sends all states, or the full resource list. The text is the reason.
     """
@@ -180,7 +180,7 @@ class FileCache:
         ] = {}
 
     def _read(self, path: str) -> tuple[frozenset[str], frozenset[str]] | None:
-        """Return the registered names and the quoted names of a file, or None."""
+        """Return a file's registered names and quoted names, or None."""
         for candidate, opener in ((path, open), (path + ".gz", gzip.open)):
             try:
                 stat = os.stat(candidate)
@@ -292,7 +292,7 @@ def resource_stem(url: str) -> str:
 
 
 def resource_key(url: str) -> tuple[str, str]:
-    """Return the host and the path of a resource URL.
+    """Return a resource URL's host and path.
 
     The query string is left out: it carries a version that changes on updates.
     """
@@ -332,7 +332,7 @@ def stem_names_unused_card(stem: str, needed: set[str]) -> bool:
 def url_to_path(hass: HomeAssistant, url: str) -> str | None:
     """Map a resource URL to a local file, or None if it isn't a local file.
 
-    A URL with a host is a file of another server, whatever its path is.
+    A URL with a host is another server's file, whatever its path is.
     """
     parts = urlsplit(url)
     if parts.netloc:
@@ -344,7 +344,7 @@ def url_to_path(hass: HomeAssistant, url: str) -> str | None:
         base, rel = hass.config.path("www", "community"), path[len("/hacsfiles/") :]
     else:
         return None
-    # The same form for both paths, so that the test of the folder compares like with like.
+    # The same form for both paths, so that the folder test compares like with like.
     base = os.path.normpath(base)
     full = os.path.normpath(os.path.join(base, unquote(rel)))
     if not full.startswith(base + os.sep):
@@ -363,7 +363,7 @@ async def async_all_resources(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 @dataclass
 class DashboardScan:
-    """The strings, the keys and the mappings of one dashboard configuration."""
+    """One dashboard configuration's strings, keys and mappings."""
 
     key: str
     config: Any
@@ -393,7 +393,7 @@ def scan_dashboard(key: str, config: Any) -> DashboardScan:
 
     The walk reads the values themselves and not their JSON text. In JSON text, a line
     break inside a string is a backslash and a letter, which hides the entity ID after it,
-    and a value that JSON does not know, such as a date of a YAML dashboard, has no text.
+    and a value that JSON does not know, such as a YAML dashboard's date, has no text.
     """
     scan = DashboardScan(key, config)
     todo = [config]
@@ -419,14 +419,14 @@ async def _async_dashboard_scans(
 
     The second value names each dashboard that exists and gives no configuration: the
     browser makes its cards, or its load failed. A dashboard that does not exist is left
-    out of both. CannotNarrow is raised when no dashboard of the list exists.
+    out of both. CannotNarrow is raised when none of the list's dashboards exists.
     """
     dashboards = hass.data[LOVELACE_DATA].dashboards
     scans: list[DashboardScan] = []
     without_config: list[str] = []
     for key in keys:
         if key == DEFAULT_DASHBOARD:
-            # As the lovelace commands of Home Assistant do for a request with no URL path.
+            # As Home Assistant's lovelace commands do for a request with no URL path.
             dashboard = dashboards.get(LOVELACE_DASHBOARD) or dashboards.get(None)
         else:
             dashboard = dashboards.get(key)
@@ -454,16 +454,16 @@ async def _async_dashboard_scans(
                 del LOADING[url_path]
         scans.append(scan_dashboard(key, config))
     if not scans and not without_config:
-        raise CannotNarrow("no dashboard of the group exists or can be loaded")
+        raise CannotNarrow("none of the group's dashboards exists or can be loaded")
     return scans, without_config
 
 
 def is_loading(url_path: str | None) -> bool:
-    """True while a scan of this integration loads the dashboard with this URL path.
+    """True while this integration's scan loads the dashboard with this URL path.
 
-    The load of a YAML dashboard can fire the update event of that dashboard by itself. An
-    event that comes during such a load is the result of the load, and the load gives the
-    new configuration, so that event needs no new scan.
+    A YAML dashboard's load can fire that dashboard's update event by itself. An event that
+    comes during such a load is the load's result, and the load gives the new
+    configuration, so that event needs no new scan.
     """
     return url_path in LOADING
 
@@ -475,16 +475,16 @@ async def async_dashboard_entities(
 
     Any existing entity id that appears anywhere in the dashboards (cards, pop-ups,
     conditions, actions), the entities that a card finds by itself (the area card, a card
-    of CARD_PLATFORMS, and a card that shows each entity of a domain), the members of any
-    groups among them, the person entity of each user of the group, the configured extras,
-    and a few the frontend uses itself.
+    in CARD_PLATFORMS, and a card that shows each entity in a domain), the members of any
+    groups among them, each group user's person entity, the configured extras, and a few
+    the frontend uses itself.
 
     CannotNarrow is raised when the dashboards do not say which entities a page needs: a
     dashboard with no stored configuration, a strategy, or a card that no rule follows.
 
     `include_missing` keeps each name that has no state now. A state subscription needs
-    those names: the stream sends only the entities of its list, and an entity can get
-    its first state after a page connects, for example while Home Assistant starts.
+    those names: the stream sends only its list's entities, and an entity can get its
+    first state after a page connects, for example while Home Assistant starts.
     """
     scans, without_config = await _async_dashboard_scans(
         hass, list(options.get(CONF_DASHBOARDS, []))
@@ -501,7 +501,7 @@ async def async_dashboard_entities(
 
     entities = registry_entities(hass)
     states = hass.states.async_all()
-    # The registry holds the domain of an entity before the entity has a state.
+    # The registry holds an entity's domain before the entity has a state.
     domains = {state.domain for state in states} | {entity.domain for entity in entities}
     if not domains:
         return set()
@@ -525,8 +525,8 @@ async def async_dashboard_entities(
         # The entities that a card finds in the registries, which the text does not name.
         found |= discovered_entities(cards, platforms, entities)
         found |= area_sensor_entities(hass, cards)
-    # The badge of a person or of a device tracker on a tile card, and a condition on the
-    # location of the user, read each zone entity
+    # A person's or a device tracker's badge on a tile card, and a condition on the user's
+    # location, read each zone entity
     # (src/panels/lovelace/cards/tile/badges/tile-badge.ts).
     if location or any(
         entity_id.startswith(("person.", "device_tracker.")) for entity_id in found
@@ -535,16 +535,16 @@ async def async_dashboard_entities(
     if wide:
         found.update(state.entity_id for state in states if state.domain in wide)
         found.update(entity.entity_id for entity in entities if entity.domain in wide)
-    # The frontend finds the person of the signed-in user by a search of all states, for
-    # a condition on the location of the user and for the picture of the user.
+    # The frontend finds the signed-in user's person by a search of all states, for a
+    # condition on the user's location and for the user's picture.
     users = set(options.get(CONF_USERS, []))
     found.update(
         state.entity_id
         for state in states
         if state.domain == "person" and state.attributes.get("user_id") in users
     )
-    # The attribute that names the members of an entity, for an entity of an integration
-    # with an attribute of its own.
+    # The attribute that names an entity's members, for an entity whose integration has
+    # an attribute of its own.
     member_attribute = {
         entity.entity_id: MEMBER_ATTRIBUTES[entity.platform]
         for entity in entities
@@ -565,7 +565,7 @@ async def async_dashboard_entities(
                         found.add(member)
                         todo.append(member)
     if include_missing:
-        # A name with no state that is the name of an action, such as light.turn_on, is
+        # A name with no state that is an action's name, such as light.turn_on, is
         # no entity. Each other name with no state stays: its first state can come later.
         return {
             entity_id
@@ -581,7 +581,7 @@ async def async_resolve(
 ) -> Resolution:
     """Split the resources into those the configured dashboards need and the rest.
 
-    CannotNarrow is raised when no dashboard of the options exists.
+    CannotNarrow is raised when none of the options' dashboards exists.
     """
     result = Resolution(dashboards=list(options.get(CONF_DASHBOARDS, [])))
     # Match on the host and the path: the query string carries a version that changes
@@ -607,7 +607,7 @@ async def async_resolve(
     # The needed types of the resources that Always exclude names. The user refused their
     # provider, so no other file is sent for them as a guess.
     refused: set[str] = set()
-    # The readable files that provide no needed type, with the path of each.
+    # The readable files that provide no needed type, with each one's path.
     unmatched: list[tuple[dict[str, Any], str, frozenset[str]]] = []
     for item in await async_all_resources(hass):
         url = item.get("url", "")
@@ -651,7 +651,7 @@ async def async_resolve(
     # A file can register an element in a way that the scan does not see, such as a
     # minified decorator. So for a needed type that no file provides, each file that
     # names the type in quotes is included. A type with a provider never takes this way,
-    # so a file that only mentions a card of another file stays out.
+    # so a file that only mentions another file's card stays out.
     guessed: set[str] = set()
     for item, path, names in unmatched:
         missing = needed - provided - refused

@@ -1,13 +1,13 @@
 """Entities that a card finds by itself.
 
-A dashboard names most of its entities, and the resolver finds those in the text of the
-dashboard. Some cards name an area or an integration instead, and find their entities in the
-registries of Home Assistant. A user with a narrowed state stream needs those entities too.
+A dashboard names most of its entities, and the resolver finds those in the dashboard's
+text. Some cards name an area or an integration instead, and find their entities in Home
+Assistant's registries. A user with a narrowed state stream needs those entities too.
 
-The rules of the area card follow the frontend: the card in
+The area card's rules follow the frontend: the card in
 src/panels/lovelace/cards/hui-area-card.ts and its feature "area-controls" in
-src/data/area/area_controls.ts. The card shows an entity of its area only when the entity
-is not hidden and has no entity category. The Home Assistant imports are inside the
+src/data/area/area_controls.ts. The card shows one of its area's entities only when the
+entity is not hidden and has no entity category. The Home Assistant imports are inside the
 functions that need them, so that the selection logic runs in a plain unit test.
 """
 
@@ -28,9 +28,9 @@ STRATEGY_KEY = "strategy"
 # Core cards and badges that find their entities by themselves, in a way that no rule of
 # this module follows. The home-summary card filters each entity by domain and area
 # (src/panels/lovelace/cards/hui-home-summary-card.ts). The energy, water and power cards
-# and the three total badges take their entities from the energy settings. The names are
-# those of src/panels/lovelace/create-element/create-card-element.ts and
-# create-badge-element.ts of the frontend 20261028.5. A prefix is no test: the card feature
+# and the three total badges take their entities from the energy settings. The names
+# come from src/panels/lovelace/create-element/create-card-element.ts and
+# create-badge-element.ts in the frontend 20261028.5. A prefix is no test: the card feature
 # "water-heater-operation-modes" is none of these.
 UNSCOPED_TYPES = frozenset(
     {
@@ -60,20 +60,20 @@ UNSCOPED_TYPES = frozenset(
         "water-total",
     }
 )
-# The features of a card have type names of their own, so no card type is read there.
+# A card's features have type names of their own, so no card type is read there.
 FEATURES_KEY = "features"
-# The map card shows each entity of some domains for two of its options
+# The map card shows each entity in some domains for two of its options
 # (src/panels/lovelace/cards/hui-map-card.ts): `geo_location_sources` gives each
 # geo_location entity, and `show_all` gives each person, device_tracker and zone entity.
 MAP_CARD_TYPE = "map"
-# Core cards that show each entity of a domain. The updates card counts each update entity
+# Core cards that show each entity in a domain. The updates card counts each update entity
 # (src/panels/lovelace/cards/hui-updates-card.ts).
 DOMAIN_CARDS: dict[str, tuple[str, ...]] = {"updates": ("update",)}
-# The visibility condition on the location of the user
+# The visibility condition on the user's location
 # (src/panels/lovelace/common/validate-condition.ts).
 LOCATION_CONDITION = "location"
-# The domains of the control buttons of the feature "area-controls". The name of a cover
-# control is "cover-" and its device class.
+# The control buttons' domains for the feature "area-controls". A cover control's name is
+# "cover-" and its device class.
 CONTROL_DOMAINS = ("light", "fan", "switch", "cover")
 # An area card also reads these sensor classes from an attribute of entities of other domains.
 ATTRIBUTE_SENSOR_DOMAINS: dict[str, tuple[str, ...]] = {
@@ -95,7 +95,7 @@ class RegistryEntity:
 
     @property
     def domain(self) -> str:
-        """The domain of the entity."""
+        """The entity's domain."""
         return self.entity_id.partition(".")[0]
 
 
@@ -129,7 +129,7 @@ class AreaCard:
 
 
 def _strings(value: Any) -> frozenset[str]:
-    """Return the strings of a configuration value that is a list or one string."""
+    """Return the strings in a configuration value that is a list or one string."""
     if isinstance(value, str):
         return frozenset({value})
     if isinstance(value, list):
@@ -138,7 +138,7 @@ def _strings(value: Any) -> frozenset[str]:
 
 
 def _control_domains(card: dict[str, Any]) -> frozenset[str]:
-    """Return the domains of the control buttons of an area card."""
+    """Return an area card's control button domains."""
     domains: set[str] = set()
     features = card.get("features")
     for feature in features if isinstance(features, list) else []:
@@ -171,9 +171,9 @@ def _area_card(card: dict[str, Any]) -> AreaCard:
 
 
 def area_cards(config: Any) -> list[AreaCard]:
-    """Return each area card of a dashboard configuration, at any depth.
+    """Return each area card in a dashboard configuration, at any depth.
 
-    The configuration of a strategy is left out: a strategy with the type "area" is no
+    A strategy's configuration is left out: a strategy with the type "area" is no
     area card, and the browser makes its cards.
     """
     found: list[AreaCard] = []
@@ -197,8 +197,8 @@ def has_strategy(config: Any) -> bool:
     """True when the dashboard, one of its views or one of their sections has a strategy.
 
     The frontend reads the key only at these three places (isStrategyDashboard,
-    isStrategyView and isStrategySection). The same key in another mapping, such as an
-    option of a custom card or the data of an action, is no strategy.
+    isStrategyView and isStrategySection). The same key in another mapping, such as a
+    custom card's option or an action's data, is no strategy.
     """
     if not isinstance(config, dict):
         return False
@@ -238,7 +238,7 @@ def unscoped_reason(config: Any) -> str | None:
 
 
 def wide_domains(nodes: Iterable[Any]) -> set[str]:
-    """Return the domains of which a card of the dashboard shows each entity."""
+    """Return each domain whose every entity one of the dashboard's cards shows."""
     domains: set[str] = set()
     for node in nodes:
         if not isinstance(node, dict):
@@ -255,9 +255,9 @@ def wide_domains(nodes: Iterable[Any]) -> set[str]:
 
 
 def has_location_condition(nodes: Iterable[Any]) -> bool:
-    """True when the dashboard holds a condition on the location of the user.
+    """True when the dashboard holds a condition on the user's location.
 
-    The frontend then reads the person entity of the user and the zone entities.
+    The frontend then reads the user's person entity and the zone entities.
     """
     return any(
         isinstance(node, dict) and node.get("condition") == LOCATION_CONDITION
@@ -266,7 +266,7 @@ def has_location_condition(nodes: Iterable[Any]) -> bool:
 
 
 def card_platforms(custom_types: Iterable[str]) -> set[str]:
-    """Return the integrations whose entities the custom cards of a dashboard show."""
+    """Return the integrations whose entities a dashboard's custom cards show."""
     types = set(custom_types)
     return {platform for card, platform in CARD_PLATFORMS.items() if card in types}
 
@@ -276,7 +276,7 @@ def discovered_entities(
     platforms: Iterable[str],
     entities: Iterable[RegistryEntity],
 ) -> set[str]:
-    """Return the entities that the area cards and the cards of these integrations show."""
+    """Return the entities that the area cards and these integrations' cards show."""
     cards = list(cards)
     platforms = set(platforms)
     return {
@@ -287,12 +287,12 @@ def discovered_entities(
 
 
 def registry_entities(hass: Any) -> list[RegistryEntity]:
-    """Return each enabled entity of the entity registry, with its area and device class.
+    """Return each enabled entity in the entity registry, with its area and device class.
 
-    The area is that of the entity, or else the effective area of its device: a child
-    device with no area of its own has the area of its parent device. The device class is
-    the attribute of the state, which is the value that the frontend filters on. An entity
-    with no state yet takes the device class of the registry.
+    The area is the entity's own, or else its device's effective area: a child device with
+    no area of its own has its parent device's area. The device class is the state's
+    attribute, which is the value that the frontend filters on. An entity with no state
+    yet takes the registry's device class.
     """
     from homeassistant.helpers import device_registry as dr, entity_registry as er
 
@@ -326,7 +326,7 @@ def registry_entities(hass: Any) -> list[RegistryEntity]:
 
 
 def area_sensor_entities(hass: Any, cards: Iterable[AreaCard]) -> set[str]:
-    """Return the temperature and humidity entities that the areas of the cards name.
+    """Return the temperature and humidity entities that the cards' areas name.
 
     An area can name one entity for its temperature and one for its humidity. An area card
     then shows that entity, which can belong to another area.

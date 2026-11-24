@@ -58,7 +58,7 @@ def _with_stored(
 
     A select field refuses a value outside its options. A group can hold a user or a
     dashboard that was deleted, or a resource URL whose version changed. Without that
-    value among the options, the form of the group cannot be saved.
+    value among the options, the group's form cannot be saved.
     """
     known = {option["value"] for option in options}
     gone = [value for value in stored or [] if isinstance(value, str) and value not in known]
@@ -70,9 +70,9 @@ def _with_stored(
 async def _async_group_schema(
     hass: HomeAssistant, current: dict[str, Any], new_group: bool
 ) -> vol.Schema:
-    """Return the form of one group, with `current` as the values that it shows.
+    """Return one group's form, with `current` as the values that it shows.
 
-    The state filter of a new group is on. A stored group with no such value does not
+    A new group's state filter is on. A stored group with no such value does not
     narrow the states, so its form shows the filter as off.
     """
     all_users = [u for u in await hass.auth.async_get_users() if not u.system_generated]
@@ -164,7 +164,7 @@ class GroupSubentryFlow(ConfigSubentryFlow):
     """Add or change one group of lite users."""
 
     def _errors(self, user_input: dict[str, Any], group_id: str | None) -> dict[str, str]:
-        """Return the form errors of the input for the group with this ID (None: a new one)."""
+        """Return the input's form errors for the group with this ID (None: a new one)."""
         if not str(user_input.get(CONF_NAME, "")).strip():
             return {CONF_NAME: "no_name"}
         if not user_input.get(CONF_USERS):
@@ -205,7 +205,7 @@ class GroupSubentryFlow(ConfigSubentryFlow):
             if not errors:
                 data = dict(user_input)
                 name = str(data.pop(CONF_NAME)).strip()
-                # The update listener of the entry gives the open pages the new settings.
+                # The entry's update listener gives the open pages the new settings.
                 return self.async_update_and_abort(
                     entry, subentry, title=name, data=data
                 )

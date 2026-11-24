@@ -1,6 +1,6 @@
-"""The texts of the forms agree with the forms.
+"""The forms' texts agree with the forms.
 
-Home Assistant shows the key of a field or of an error when no text exists for it.
+Home Assistant shows a field's or an error's key when no text exists for it.
 """
 
 from __future__ import annotations

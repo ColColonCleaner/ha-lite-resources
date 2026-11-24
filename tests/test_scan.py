@@ -1,8 +1,8 @@
-"""What the scan of a dashboard gives a state subscription, and when it gives nothing.
+"""What a dashboard scan gives a state subscription, and when it gives nothing.
 
-Each case comes from a finding of a review of the scan: a dashboard that names no
-entity because the browser makes its cards, a card that shows each entity of a domain,
-and an entity ID that the search of the JSON text of a dashboard did not see.
+Each case comes from a review finding on the scan: a dashboard that names no entity
+because the browser makes its cards, a card that shows each entity in a domain, and an
+entity ID that the search of a dashboard's JSON text did not see.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ STATES = {
 
 
 class _Dashboard:
-    """A dashboard of the lovelace table. `config` None means no stored configuration."""
+    """A dashboard in the lovelace table. `config` None means no stored configuration."""
 
     def __init__(self, config) -> None:
         self._config = config
@@ -128,7 +128,7 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(card_type, reason)
 
     async def test_card_feature_with_a_like_name_stops_nothing(self) -> None:
-        # The feature of a water heater is no water card. A prefix of a type is no test.
+        # A water heater's feature is no water card. A type's prefix is no test.
         card = {
             "type": "tile",
             "entity": "light.hall",
@@ -166,7 +166,7 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_discovery.area_cards(view), [])
 
     async def test_default_dashboard_is_the_lovelace_dashboard_when_it_exists(self) -> None:
-        # The lovelace commands of Home Assistant take "lovelace" before the key None.
+        # Home Assistant's lovelace commands take "lovelace" before the key None.
         dashboards = {
             "lovelace": _cards({"type": "tile", "entity": "light.hall"}),
             None: None,
@@ -180,7 +180,7 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
 
 
 class EntityScanTest(unittest.IsolatedAsyncioTestCase):
-    """The entities that the scan of a stored dashboard finds."""
+    """The entities that a stored dashboard's scan finds."""
 
     async def test_entity_after_a_line_break_or_a_tab_in_a_string(self) -> None:
         card = {"type": "custom:list-card", "entities": "light.hall\nlight.second\tlight.third"}
@@ -201,7 +201,7 @@ class EntityScanTest(unittest.IsolatedAsyncioTestCase):
         found = await _entities({"d": _cards({"type": "tile", "entity": "light.hall"})})
         self.assertIn("person.kiosk", found)
         self.assertNotIn("person.anna", found)
-        # The person of a user is no person that a card names, so no zone follows.
+        # A user's person is no person that a card names, so no zone follows.
         self.assertNotIn("zone.work", found)
 
     async def test_location_condition_gives_each_zone(self) -> None:

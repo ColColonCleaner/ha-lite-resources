@@ -1,6 +1,6 @@
-"""Groups of lite users, and the narrowed state subscriptions of their open pages.
+"""Groups of lite users, and their open pages' narrowed state subscriptions.
 
-The cases come from two sets of panels in one home: the kiosks of a workshop, which show
+The cases come from two sets of panels in one home: a workshop's kiosks, which show
 one dashboard, and a kitchen tablet, which shows another.
 """
 
@@ -96,7 +96,7 @@ class GroupLookupTest(unittest.TestCase):
         self.assertEqual(
             _groups.users_in_other_groups(GROUPS, None, ["u-w1", "u-new"]), {"u-w1"}
         )
-        # A change of the workshop group keeps its own users.
+        # A change to the workshop group keeps its own users.
         self.assertEqual(
             _groups.users_in_other_groups(GROUPS, "g-workshop", ["u-w1", "u-w2"]), set()
         )
@@ -133,7 +133,7 @@ def _schema(msg: dict) -> dict:
 
 
 def _page_msg(msg_id: int) -> dict:
-    """The message of a page, as Home Assistant gives it to a handler."""
+    """A page's message, as Home Assistant gives it to a handler."""
     return _schema({"id": msg_id, "type": "subscribe_entities"})
 
 
@@ -154,7 +154,7 @@ class _Connection:
 
 
 class _Core:
-    """The subscribe_entities handler of Home Assistant, reduced to what the pages see."""
+    """Home Assistant's subscribe_entities handler, reduced to what the pages see."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -163,7 +163,7 @@ class _Core:
         self.fail_all = False
 
     def subscribe(self, connection, msg) -> None:
-        # The handler of Home Assistant reads both keys with no default. Its schema adds
+        # Home Assistant's handler reads both keys with no default. Its schema adds
         # them, so a message that did not pass the schema raises KeyError here.
         msg["include"], msg["exclude"]  # noqa: B018
         call = {"entity_ids": msg.get("entity_ids"), "ended": False}
@@ -209,7 +209,7 @@ class LiveSubscriptionsTest(unittest.TestCase):
         self.assertTrue(self.core.calls[0]["ended"])
         self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.c"])
         self.assertFalse(self.core.calls[1]["ended"])
-        # The page has the result of its subscription. It gets no second one.
+        # The page has its subscription's result. It gets no second one.
         self.assertEqual(self.connection.results, [5])
         # The entity that left the set is removed from the page.
         self.assertEqual(
@@ -310,19 +310,19 @@ class LiveSubscriptionsTest(unittest.TestCase):
 
 
 def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
-    """Stand-in for the listener of Home Assistant with the same name and arguments."""
+    """Stand-in for Home Assistant's listener with the same name and arguments."""
 
 
-# The search takes this function only from the module of Home Assistant that defines it.
+# The search takes this function only from the Home Assistant module that defines it.
 _forward_entity_changes.__module__ = _groups.CORE_FORWARD_MODULE
 
 
 def _other_listener(event):
-    """A listener of another integration."""
+    """Another integration's listener."""
 
 
 def _job(connection, msg_id, entity_ids=None, entity_filter=None, func=_forward_entity_changes):
-    """One item of the listener list of the event bus, in the layout of Home Assistant."""
+    """One item of the event bus's listener list, in Home Assistant's layout."""
     listener = functools.partial(
         func, connection.send_message, entity_ids, entity_filter, connection.user, str(msg_id).encode()
     )
@@ -357,7 +357,7 @@ class UnfilteredSubscriptionsTest(unittest.TestCase):
 
     def test_function_of_the_same_name_in_another_module_is_left_out(self) -> None:
         def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
-            """A copy of the listener of Home Assistant in another integration."""
+            """A copy of Home Assistant's listener in another integration."""
 
         self.assertEqual(self._found(_job(self.page, 5, func=_forward_entity_changes)), [])
 
@@ -393,13 +393,13 @@ class UnfilteredSubscriptionsTest(unittest.TestCase):
 
 
 class AdoptTest(unittest.TestCase):
-    """A subscription for all entities that the handler of Home Assistant made."""
+    """A subscription for all entities that Home Assistant's handler made."""
 
     def setUp(self) -> None:
         self.core = _Core()
         self.live = LiveSubscriptions(self.core.subscribe, _schema)
         self.connection = _Connection()
-        # The page subscribed with the handler of Home Assistant.
+        # The page subscribed with Home Assistant's handler.
         self.core.subscribe(self.connection, _page_msg(5))
 
     def test_adopted_subscription_is_narrowed_in_place(self) -> None:
@@ -415,7 +415,7 @@ class AdoptTest(unittest.TestCase):
         self.assertEqual(len(self.live), 1)
 
     def test_adopted_subscription_is_narrowed_also_when_the_page_holds_no_other_entity(self) -> None:
-        # Early in a start, the page can hold only entities of its dashboards.
+        # Early in a start, the page can hold only its dashboards' entities.
         self.assertTrue(self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a", "sensor.b"}))
         self.assertTrue(self.core.calls[0]["ended"])
         self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.b"])
@@ -433,12 +433,12 @@ class AdoptTest(unittest.TestCase):
         self.assertIn(5, self.connection.subscriptions)
         self.assertEqual(len(self.live), 0)
         self.assertFalse(any("r" in message["event"] for message in self.connection.messages))
-        # The function of the connection still ends that first listener.
+        # The connection's function still ends that first listener.
         self.connection.subscriptions.pop(5)()
         self.assertTrue(self.core.calls[0]["ended"])
 
     def test_adopted_message_passes_the_schema_of_the_command(self) -> None:
-        # The handler of Home Assistant reads keys that only its schema adds.
+        # Home Assistant's handler reads keys that only its schema adds.
         self.assertTrue(self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a"}))
         item = self.live.items()[0]
         self.assertEqual(item.msg["include"], {})
@@ -446,7 +446,7 @@ class AdoptTest(unittest.TestCase):
 
     def test_adoption_with_no_schema_fails_and_changes_nothing(self) -> None:
         # A message that did not pass the schema makes the handler fail. That was the
-        # fault of the first 0.3.4 code. The page must then keep its first listener.
+        # first 0.3.4 code's fault. The page must then keep its first listener.
         live = LiveSubscriptions(self.core.subscribe)
         with self.assertLogs(_groups._LOGGER, level="ERROR"):
             self.assertFalse(live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a"}))
