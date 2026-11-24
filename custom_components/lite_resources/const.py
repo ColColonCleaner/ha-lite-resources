@@ -20,11 +20,12 @@ REGISTRY_EVENTS = (
 # The registries change in bursts. The open pages get one update this number of seconds
 # after the first change of a burst.
 REGISTRY_REFRESH_DELAY = 10
-# The longest wait in seconds for the entity scan of one group. The changes to the open
-# pages run one after the other, so a scan with no end would hold each later change.
+# The longest wait in seconds for one scan. The changes to the open pages run one after
+# the other, so a scan with no end would hold each later change.
 SCAN_TIMEOUT = 30
-# When the scan of a group fails, a later update tries it again. This is the largest
-# number of such tries in a row, each REGISTRY_REFRESH_DELAY seconds after the one before.
+# A failed scan of a group asks for one more update of that group, and that update
+# starts REGISTRY_REFRESH_DELAY seconds after the request. This is the number of failed
+# scans in a row after which no further update is asked for.
 UPDATE_RETRIES = 6
 
 CONF_USERS = "users"

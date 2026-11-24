@@ -37,6 +37,9 @@ def _dashboard(*cards) -> _Dashboard:
 
 class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        # The resolver module keeps its last warnings and the last dashboard states.
+        _resolver._WARNED.clear()
+        _resolver._SEEN.clear()
         self._tmp = tempfile.TemporaryDirectory()
         self.root = self._tmp.name
         _write(self.root, "layout-card/layout-card.js", LAYOUT_CARD_JS)
@@ -218,6 +221,27 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs(_resolver._LOGGER, level="WARNING") as logs:
             await _resolver.async_resolve(hass, options, FileCache())
         self.assertEqual(len(logs.records), 1)
+
+    async def test_word_that_ends_in_type_is_no_key(self) -> None:
+        for text in (
+            "The prototype: custom:layout-card",
+            "subtype=custom:layout-card",
+        ):
+            summary = await self._resolve({"type": "markdown", "content": text})
+            self.assertEqual(summary["needed_types"], [], text)
+        # A key such as card_type is a key.
+        summary = await self._resolve(
+            {"type": "markdown", "content": "card_type: custom:layout-card"}
+        )
+        self.assertEqual(summary["needed_types"], ["layout-card"])
+
+    async def test_custom_type_with_a_dot_inside_a_longer_string(self) -> None:
+        card = {
+            "type": "custom:button-card",
+            "card": "[[[ return 'custom:my.dotted-card' ]]]",
+        }
+        summary = await self._resolve(card)
+        self.assertIn("my.dotted-card", summary["needed_types"])
 
     async def test_custom_type_in_plain_text_is_no_card(self) -> None:
         card = {"type": "markdown", "content": "Do not use custom:layout-card here."}

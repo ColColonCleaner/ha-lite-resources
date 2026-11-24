@@ -187,6 +187,7 @@ def _effective_area_id(hass, device) -> str | None:
 def install_homeassistant_stubs() -> None:
     """Add each missing stand-in. The order of the test files does not matter."""
     try:
+        # The import only shows whether the real package is there.
         import voluptuous  # noqa: F401
     except ImportError:
         vol = _module("voluptuous")
@@ -226,6 +227,8 @@ def install_homeassistant_stubs() -> None:
     _default(
         _module("homeassistant.helpers.start"), "async_at_started", _async_at_started
     )
+
+    _default(_module("homeassistant.util.json"), "JsonValueType", Any)
 
     core = _module("homeassistant.core")
     _default(core, "HomeAssistant", object)

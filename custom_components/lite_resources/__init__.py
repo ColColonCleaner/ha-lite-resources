@@ -15,10 +15,13 @@ Everyone else gets Home Assistant's normal behaviour. Nothing is changed on disk
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 import logging
 from types import MappingProxyType
 from typing import Any
 
+# Home Assistant gives this name to its validation library Probatio.
 import voluptuous as vol
 
 from homeassistant.auth.permissions.const import POLICY_READ
@@ -36,6 +39,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.entityfilter import convert_include_exclude_filter
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.start import async_at_started
+from homeassistant.util.json import JsonValueType
 
 from .const import (
     CONF_FILTER_STATES,
@@ -67,13 +71,24 @@ from .resolver import (
     async_dashboard_entities,
     async_listen_changes,
     async_resolve,
-    own_load_fired,
+    forget_warnings,
+    is_own_load,
+    note_event,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # The title of the group that the migration makes from the options of a single-group version.
 MIGRATED_GROUP_TITLE = "Lite users"
+# Stands for "no warning yet" in the table of the last warnings.
+_NO_WARNING = object()
+
+
+class ScanTrouble(Exception):
+    """The entity scan of a group gave no result that a caller can use.
+
+    The log holds the reason, and a later update tries the group again.
+    """
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -108,14 +123,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     original_handler, original_schema = original
     sub_handler, sub_schema = original_sub
     cache = FileCache()
-    # The keys of the warnings that the log already holds. A warning that repeats at each
-    # request from each page hides a new one.
-    warned: set[Any] = set()
+    # A warning of the scan from before this setup is new for this setup.
+    forget_warnings()
+    # The value of the last warning for each subject, such as the reason why the states
+    # of one group are not narrowed. A warning at each request from each page hides a new
+    # one, so the log gets a warning only when its value changes.
+    warnings: dict[tuple[Any, ...], Any] = {}
 
-    def warn_once(key: Any, message: str, *args: Any) -> None:
-        if key not in warned:
-            warned.add(key)
+    def warn_change(key: tuple[Any, ...], value: Any, message: str, *args: Any) -> None:
+        """Log the warning when the value for this subject is new."""
+        if warnings.get(key, _NO_WARNING) != value:
+            warnings[key] = value
             _LOGGER.warning(message, *args)
+
+    def forget_warning(key: tuple[Any, ...]) -> None:
+        """The cause is gone. The same cause is new when it comes back."""
+        warnings.pop(key, None)
 
     # "unloaded" is True after this setup's unload. A task from this setup that still
     # waits at that time must change no page, and the handlers from this setup pass each
@@ -126,14 +149,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """True after this setup's unload. The value can change during each wait."""
         return setup_state["unloaded"]
 
-    # The IDs of the groups whose last scan failed or could not load a dashboard. A later
-    # update tries those scans again, at most UPDATE_RETRIES times in a row.
-    trouble: set[str] = set()
-    retries = {"left": UPDATE_RETRIES}
-    # The scan that runs for each group, by the group ID. A scan that passed its time
-    # limit stays here until it ends. The next scan of that group starts only then, so a
-    # load that hangs holds one thread of the executor, and not one more for each try.
-    open_scans: dict[str, asyncio.Task[set[str]]] = {}
+    # The count of scans in a row that failed, for each group ID. A scan that works
+    # takes the group out. Each group has its own count, so the pages of one group never
+    # use the tries of another group.
+    failures: dict[str, int] = {}
+    # The IDs of the groups whose dashboards do not say which entities a page needs, such
+    # as a group with a strategy dashboard. Only a change to a dashboard or to a group can
+    # change that, so an update after a registry change leaves these groups out.
+    unscoped: set[str] = set()
+    # The scan that runs for each group ID, with the group as it was at the start of the
+    # scan. A scan that passed its time limit stays here until it ends.
+    open_scans: dict[str, tuple[asyncio.Task[set[str]], Group]] = {}
 
     def groups() -> list[Group]:
         # Read at each request, so a change to a group needs no reload.
@@ -142,13 +168,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def check_groups() -> None:
         twice = users_in_two_groups(groups())
         if twice:
-            warn_once(
-                ("two groups", tuple(sorted(twice))),
+            warn_change(
+                ("two groups",),
+                tuple(sorted(twice)),
                 "%d user(s) are in more than one group of lite users. The first group "
                 "in the list counts for each of them: %s",
                 len(twice),
                 ", ".join(sorted(twice)),
             )
+        else:
+            forget_warning(("two groups",))
 
     def group_of(connection: websocket_api.ActiveConnection) -> Group | None:
         user = connection.user
@@ -160,61 +189,126 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         None means that the group's dashboards do not say which entities a page needs, so
         the group's states are not narrowed. The set holds also each name with no state
         now, so that a page gets an entity whose first state comes after the page
-        connected. A scan error is raised, and so is a scan that takes longer than
-        SCAN_TIMEOUT seconds, such as the load of a YAML dashboard from a dead share.
+        connected.
 
-        A group whose scan failed, or whose dashboard could not be loaded, goes into
-        `trouble`, so that a later update tries its scan again.
+        ScanTrouble is raised when the scan gave no result that a caller can use. The
+        scan failed, or a dashboard could not be loaded, or the scan runs longer than
+        SCAN_TIMEOUT seconds, such as the load of a YAML dashboard from a dead share.
+        The log then holds the reason, and a later update tries the group again. So a
+        caller does nothing more: a new page gets all states for that time, and an open
+        page keeps its entities.
         """
+        group_id = group.group_id
+        key = ("states", group_id)
+        running, scanned = open_scans.get(group_id, (None, None))
+        if running is not None and not running.done() and scanned == group:
+            # This scan passed its time limit before. Its end starts an update of the
+            # group, so nobody waits for it a second time.
+            raise ScanTrouble(f"the entity scan of group {group.name} still runs")
         # The scan runs as a task of its own, and the time limit only stops the wait for
         # it. A cancel would stop the load of a YAML dashboard inside Home Assistant
-        # before that load fires the update event of the dashboard.
-        deadline = hass.loop.time() + SCAN_TIMEOUT
-        scan = open_scans.get(group.group_id)
-        if scan is not None and not scan.done():
-            # An earlier scan of this group still runs after its time limit. Its result
-            # can be older than the last change to a dashboard, so it is not used.
-            await asyncio.wait({scan}, timeout=SCAN_TIMEOUT)
-        if scan is None or scan.done():
-            scan = hass.async_create_task(
-                async_dashboard_entities(
-                    hass, dict(group.options), include_missing=True
-                ),
-                name=f"{DOMAIN} entity scan",
-            )
-            open_scans[group.group_id] = scan
-            if not scan.done():
-                await asyncio.wait({scan}, timeout=max(deadline - hass.loop.time(), 0))
+        # before that load fires the update event of the dashboard. A background task
+        # holds neither the start nor the stop of Home Assistant. It is a task of Home
+        # Assistant and not of the config entry, because an unload cancels each
+        # background task of its entry. A scan of this group that still runs for other
+        # dashboards, from before a change to the group, is left alone, and its result
+        # is not used.
+        scan = hass.async_create_background_task(
+            async_dashboard_entities(hass, dict(group.options), include_missing=True),
+            name=f"{DOMAIN} entity scan",
+        )
+        open_scans[group_id] = (scan, group)
         if not scan.done():
-            scan.add_done_callback(_drop_result)
-            trouble.add(group.group_id)
-            raise TimeoutError(
-                f"the entity scan of group {group.name} took longer than "
-                f"{SCAN_TIMEOUT} seconds"
+            await asyncio.wait({scan}, timeout=SCAN_TIMEOUT)
+        if not scan.done():
+            scan.add_done_callback(functools.partial(late_scan_done, group_id))
+            warn_change(
+                key,
+                "time limit",
+                "The entity scan of group %s runs longer than %s seconds. A new panel "
+                "gets all states, and an open panel keeps its entities. The panels of "
+                "the group get an update when the scan ends",
+                group.name,
+                SCAN_TIMEOUT,
             )
-        del open_scans[group.group_id]
+            raise ScanTrouble(f"the entity scan of group {group.name} passed its limit")
+        if open_scans.get(group_id, (None, None))[0] is scan:
+            del open_scans[group_id]
         try:
             entities = scan.result()
         except CannotNarrow as err:
-            warn_once(
-                ("states", group.group_id, str(err)),
+            if err.retry:
+                # Such as a dashboard that cannot be loaded now.
+                warn_change(
+                    key,
+                    str(err),
+                    "The entity scan of group %s cannot run: %s. A new panel gets all "
+                    "states, and an open panel keeps its entities",
+                    group.name,
+                    err,
+                )
+                scan_failed(group)
+                raise ScanTrouble(str(err)) from err
+            warn_change(
+                key,
+                str(err),
                 "The states of group %s are not narrowed: %s",
                 group.name,
                 err,
             )
-            if err.retry:
-                trouble.add(group.group_id)
-            else:
-                trouble.discard(group.group_id)
+            failures.pop(group_id, None)
+            unscoped.add(group_id)
             return None
-        except Exception:
-            trouble.add(group.group_id)
-            raise
-        trouble.discard(group.group_id)
-        # A reason that comes back later is new, so the log must hold it again.
-        for key in [k for k in warned if k[:2] == ("states", group.group_id)]:
-            warned.discard(key)
+        except Exception as err:
+            # The traceback goes into the log one time for each new error text.
+            if warnings.get(key, _NO_WARNING) != repr(err):
+                warnings[key] = repr(err)
+                _LOGGER.exception(
+                    "The entity scan of group %s failed. A new panel gets all states, "
+                    "and an open panel keeps its entities",
+                    group.name,
+                )
+            scan_failed(group)
+            raise ScanTrouble(repr(err)) from err
+        failures.pop(group_id, None)
+        unscoped.discard(group_id)
+        forget_warning(key)
         return entities
+
+    @callback
+    def scan_failed(group: Group) -> None:
+        """Count a failed scan of the group, and ask for a later try of that group.
+
+        Each scan of the group counts, also one that a new page or a change starts. The
+        later tries stop when the count passes UPDATE_RETRIES, and a scan that works
+        starts the count again.
+        """
+        count = failures.get(group.group_id, 0) + 1
+        failures[group.group_id] = count
+        if count <= UPDATE_RETRIES:
+            request_later_update({group.group_id})
+        elif count == UPDATE_RETRIES + 1:
+            _LOGGER.warning(
+                "The entity scan of group %s failed %d times in a row. The next try "
+                "comes with the next change to a dashboard or to the group, or when a "
+                "panel of the group connects",
+                group.name,
+                count,
+            )
+
+    def late_scan_done(group_id: str, scan: asyncio.Task[set[str]]) -> None:
+        """A scan ended after its time limit: ask for an update of its group.
+
+        The update runs a new scan, which ends in time when the load works again. The
+        result of the late scan is not used, because a dashboard can be newer than it.
+        """
+        if open_scans.get(group_id, (None, None))[0] is scan:
+            del open_scans[group_id]
+        if scan.cancelled():
+            return
+        # Read the error, so that Python reports no error that nobody read.
+        scan.exception()
+        request_update({group_id})
 
     @websocket_api.websocket_command({vol.Required("type"): WS_RESOURCES})
     @websocket_api.async_response
@@ -227,55 +321,90 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if group is None:
             original_handler(hass, connection, msg)
             return
-        try:
-            result = await async_resolve(hass, dict(group.options), cache)
-        except CannotNarrow as err:
-            warn_once(
-                ("resources", group.group_id, str(err)),
-                "The resources of group %s are not reduced: %s",
+        key = ("resources", group.group_id)
+        # The scan runs as a task of its own, as the entity scan does. The time limit
+        # ends the wait, and not the load of a dashboard. A page with no answer to this
+        # command loads no card at all, so a scan with no end gets the full list.
+        scan = hass.async_create_background_task(
+            async_resolve(hass, dict(group.options), cache),
+            name=f"{DOMAIN} resource scan",
+        )
+        if not scan.done():
+            await asyncio.wait({scan}, timeout=SCAN_TIMEOUT)
+        result = None
+        if not scan.done():
+            scan.add_done_callback(_drop_result)
+            warn_change(
+                key,
+                "time limit",
+                "The resource scan of group %s runs longer than %s seconds; sending the "
+                "full list",
                 group.name,
-                err,
+                SCAN_TIMEOUT,
             )
-            original_handler(hass, connection, msg)
-            return
-        except Exception:  # never leave a device without its cards
-            _LOGGER.exception("Resolving resources failed; sending the full list")
-            original_handler(hass, connection, msg)
-            return
+        else:
+            try:
+                result = scan.result()
+            except CannotNarrow as err:
+                warn_change(
+                    key,
+                    str(err),
+                    "The resources of group %s are not reduced: %s",
+                    group.name,
+                    err,
+                )
+            except Exception:  # never leave a device without its cards
+                _LOGGER.exception("Resolving resources failed; sending the full list")
         if unloaded():
-            # The unload came during the scan: the full list, as with no integration.
+            # The unload came during the scan. After a reload, the handler of the new
+            # setup answers, so the page still gets its reduced list.
+            answer = resources_handler_now()(hass, connection, msg)
+            if inspect.isawaitable(answer):
+                await answer
+            return
+        if result is None:
             original_handler(hass, connection, msg)
             return
-        # A reason that comes back later is new, so the log must hold it again.
-        for key in [k for k in warned if k[:2] == ("resources", group.group_id)]:
-            warned.discard(key)
-        if result.unresolved_types:
-            warn_once(
-                ("unresolved", group.group_id, tuple(result.unresolved_types)),
-                "No local resource provides %s for group %s; add it under "
-                "'Always include' if those cards fail to load",
-                ", ".join(result.unresolved_types),
-                group.name,
-            )
-        if result.guessed_types:
-            warn_once(
-                ("guessed", group.group_id, tuple(result.guessed_types)),
-                "No resource registers %s for group %s in a way that the scan sees. Each "
-                "resource that names it, and that holds a registration that the scan "
-                "cannot read, is sent. If those cards fail to load, add their resource "
-                "under 'Always include'",
-                ", ".join(result.guessed_types),
-                group.name,
-            )
-        if result.unverified_types:
-            warn_once(
-                ("unverified", group.group_id, tuple(result.unverified_types)),
-                "No resource that the scan can read provides %s for group %s. A resource "
-                "that it cannot read may provide it. If those cards fail to load, add "
-                "their resource under 'Always include'",
-                ", ".join(result.unverified_types),
-                group.name,
-            )
+        forget_warning(key)
+        for kind, types, message in (
+            (
+                "unresolved",
+                result.unresolved_types,
+                (
+                    "No local resource provides %s for group %s; add it under "
+                    "'Always include' if those cards fail to load"
+                ),
+            ),
+            (
+                "guessed",
+                result.guessed_types,
+                (
+                    "No resource registers %s for group %s in a way that the scan "
+                    "sees. Each resource that names it, and that holds a registration "
+                    "that the scan cannot read, is sent. If those cards fail to load, "
+                    "add their resource under 'Always include'"
+                ),
+            ),
+            (
+                "unverified",
+                result.unverified_types,
+                (
+                    "No resource that the scan can read provides %s for group %s. A "
+                    "resource that it cannot read may provide it. If those cards fail "
+                    "to load, add their resource under 'Always include'"
+                ),
+            ),
+        ):
+            if types:
+                warn_change(
+                    (kind, group.group_id),
+                    tuple(types),
+                    message,
+                    ", ".join(types),
+                    group.name,
+                )
+            else:
+                forget_warning((kind, group.group_id))
         _LOGGER.debug(
             "%s (group %s) gets %d of %d resources",
             connection.user.name,
@@ -286,6 +415,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connection.send_result(msg["id"], result.included)
 
     websocket_api.async_register_command(hass, ws_resources)
+
+    def resources_handler_now() -> Any:
+        """Return the handler for lovelace/resources that a waiting request goes to.
+
+        That is the handler in the table now, which is the handler of the new setup
+        after a reload. While the table still holds the handler of this setup, it is the
+        handler that this setup replaced, so this setup is not called a second time.
+        """
+        pair = hass.data.get(websocket_api.DOMAIN, {}).get(WS_RESOURCES)
+        handler = pair[0] if pair else original_handler
+        return original_handler if handler is ws_resources else handler
 
     live = LiveSubscriptions(
         lambda connection, msg: sub_handler(hass, connection, msg),
@@ -335,22 +475,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         connection.subscriptions.get(msg_id) is waiting
                         and not unloaded()
                     ):
-                        had_trouble = group.group_id in trouble
+                        had_failures = group.group_id in failures
                         try:
                             entities = await entities_of(group)
-                        except Exception:  # the page gets all states for now
-                            _LOGGER.exception(
-                                "Working out the entities of group %s failed; sending "
-                                "all states",
-                                group.name,
-                            )
-                        if had_trouble and group.group_id not in trouble:
-                            # The scan of this group works again. Its other pages can
-                            # hold all states from the time of the fault.
-                            request_update({group.group_id})
-                        # A page that gets all states after a failed scan is narrowed by
-                        # a later update, when the scan works again.
-                        plan_retry()
+                        except ScanTrouble:
+                            # The page gets all states for now. The log holds the
+                            # reason, and a later update of the group narrows the page.
+                            entities = None
+                        else:
+                            if had_failures:
+                                # The scan of this group works again. Its other pages
+                                # can hold all states from the time of the fault.
+                                request_update({group.group_id})
                     if connection.subscriptions.get(msg_id) is not waiting:
                         # The connection closed, or the client ended the subscription
                         # during the wait. A client that still listens gets the result of
@@ -399,38 +535,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     def handler_now() -> Any:
-        """Return the handler that is registered for subscribe_entities now.
+        """Return the handler for subscribe_entities that a waiting page goes to.
 
-        This setup's own handler gives the handler that it replaced. So the result never
-        calls this setup again.
+        That is the handler in the table now, which is the handler of the new setup
+        after a reload. While the table still holds the handler of this setup, it is the
+        handler that this setup replaced, so this function never returns the handler of
+        this setup.
         """
         pair = hass.data.get(websocket_api.DOMAIN, {}).get(WS_SUBSCRIBE_ENTITIES)
         handler = pair[0] if pair else sub_handler
         return sub_handler if handler is ws_subscribe_entities else handler
 
     async def group_sets(
-        sets: dict[str, set[str] | None],
-        failed: set[str],
-        group: Group,
-        tried: set[str] | None,
+        sets: dict[str, set[str] | None], failed: set[str], group: Group
     ) -> bool:
-        """Put the entity set of a group into `sets`. False when its scan failed.
+        """Put the entity set of a group into `sets`. False when its scan gave no result.
 
-        `tried` gets the ID of each group that got a scan.
+        `sets` and `failed` hold the results of one update, so that each group gets
+        one scan in that update.
         """
-        if tried is not None:
-            tried.add(group.group_id)
         if group.group_id in failed:
             return False
         if group.group_id not in sets:
             try:
                 sets[group.group_id] = await entities_of(group)
-            except Exception:  # the group's pages keep what they have
-                _LOGGER.exception(
-                    "Working out the entities of group %s failed; its open pages "
-                    "keep their entities",
-                    group.name,
-                )
+            except ScanTrouble:
+                # The pages of the group keep what they have. The log holds the reason.
                 failed.add(group.group_id)
                 return False
         return True
@@ -453,19 +583,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ]
 
     async def refresh_live(
-        only: set[str] | None = None, tried: set[str] | None = None
+        only: set[str] | None, sets: dict[str, set[str] | None], failed: set[str]
     ) -> None:
         """Give each open narrowed page the entity set that its group has now.
 
-        `only` limits the work to the pages of the groups with these IDs. `tried` gets
-        the ID of each group that got a scan.
+        `only` limits the scans to the groups with these IDs. `sets` and `failed` are
+        those of `group_sets`.
         """
         async with change_lock:
             if unloaded():
                 return
             current = groups()
-            sets: dict[str, set[str] | None] = {}
-            failed: set[str] = set()
             for item in live.items():
                 try:
                     user = item.connection.user
@@ -478,7 +606,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         continue
                     if only is not None and group.group_id not in only:
                         continue
-                    scanned = await group_sets(sets, failed, group, tried)
+                    scanned = await group_sets(sets, failed, group)
                     if unloaded():
                         # The unload came during the scan. It gave each page all states.
                         return
@@ -501,25 +629,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         "The update of an open page of a lite user failed"
                     )
 
-    async def adopt_unfiltered(tried: set[str] | None = None) -> None:
+    async def adopt_unfiltered(
+        only: set[str] | None, sets: dict[str, set[str] | None], failed: set[str]
+    ) -> None:
         """Narrow each subscription to all states that a page of a lite user holds.
 
         After a Home Assistant restart, a page connects again before this setup runs.
         Home Assistant's handler then answers its state subscription, with every
-        entity. A user that joins a group holds such a subscription too. `tried` gets
-        the ID of each group that got a scan.
+        entity. A user that joins a group holds such a subscription too. A page that
+        got all states after a scan with no result holds one also. `only`, `sets` and
+        `failed` are those of `refresh_live`.
         """
         async with change_lock:
             if unloaded():
                 return
             current = groups()
-            sets: dict[str, set[str] | None] = {}
-            failed: set[str] = set()
             found, unreadable = search_state_subscriptions(hass.bus)
             _LOGGER.debug("%d open state subscription(s) hold all entities", len(found))
             if unreadable:
-                warn_once(
-                    "unreadable listeners",
+                warn_change(
+                    ("unreadable listeners",),
+                    True,
                     "%d of Home Assistant's state listeners have another layout than this "
                     "integration expects. A panel that connects before this setup, such "
                     "as after a restart, can keep all states until it connects again",
@@ -533,7 +663,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
                     if group is None or not group.filter_states:
                         continue
-                    scanned = await group_sets(sets, failed, group, tried)
+                    if only is not None and group.group_id not in only:
+                        continue
+                    scanned = await group_sets(sets, failed, group)
                     if unloaded():
                         return
                     if not scanned:
@@ -558,17 +690,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def update_pages(only: set[str] | None = None) -> None:
         """Bring each open page that belongs to a lite user in step with its group and its dashboards."""
-        tried: set[str] = set()
-        await refresh_live(only, tried)
-        # A page that got all states, because its dashboards did not say what it needs,
-        # is narrowed again when they do.
-        await adopt_unfiltered(tried)
-        # A group that got no scan in this update has no open page, so it has nothing
-        # to try again.
-        for group_id in [g for g in trouble if g not in tried]:
-            if only is None or group_id in only:
-                trouble.discard(group_id)
-        plan_retry()
+        sets: dict[str, set[str] | None] = {}
+        failed: set[str] = set()
+        await refresh_live(only, sets, failed)
+        # A page that holds all states is narrowed when its group has an entity set: a
+        # page from before the setup, and a page from the time of a scan with no result.
+        await adopt_unfiltered(only, sets, failed)
 
     # The updates that wait for the one that runs: the IDs of their groups, or "all" for
     # an update of each group. Many events close together then give one more update, and
@@ -609,31 +736,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # The event names no dashboard. None is the URL path of the default dashboard.
             return
         url_path = event.data["url_path"]
-        if own_load_fired(url_path):
-            # The load of this dashboard by a scan in this task fired the event: a YAML
-            # dashboard whose file changed. That scan calls `dashboard_changed` when the
-            # configuration differs from the last one. An update for each such event
+        if is_own_load(url_path):
+            # A scan of this integration loads this dashboard now, in this task, and
+            # that load fired the event: a YAML dashboard whose file changed. The scan
+            # compares the configuration with the last one after each load, and calls
+            # `dashboard_changed` when the two differ. An update for each such event
             # would have no end for a file that fires at each load.
             return
+        # The event comes from another task: a save, or the load of a browser. The scans
+        # of the update below load what the event announced, which is no second change.
+        note_event(url_path)
         dashboard_changed(url_path)
 
-    # An update that waits for its time: the handle of its timer, and the groups that it
-    # is for, or "all" for each group. The requests of that time join into one update.
-    later: dict[str, Any] = {"handle": None, "all": False, "groups": set()}
+    # An update that waits for its time: the handle of its timer, the groups that it is
+    # for, and "registry" when a registry changed. The requests of that time join into
+    # one update.
+    later: dict[str, Any] = {"handle": None, "registry": False, "groups": set()}
 
     @callback
     def run_later_update() -> None:
-        only = None if later["all"] else set(later["groups"])
-        later.update(handle=None, all=False, groups=set())
-        request_update(only)
+        only = set(later["groups"])
+        if later["registry"]:
+            # A registry change cannot give a group in `unscoped` an entity set.
+            only |= {g.group_id for g in groups() if g.group_id not in unscoped}
+        later.update(handle=None, registry=False, groups=set())
+        if only:
+            request_update(only)
 
     @callback
     def request_later_update(only: set[str] | None = None) -> None:
-        """Ask for an update REGISTRY_REFRESH_DELAY seconds from the first such request."""
+        """Ask for an update REGISTRY_REFRESH_DELAY seconds from the first such request.
+
+        `only` names the groups of the update. None stands for a registry change.
+        """
         if unloaded():
             return
         if only is None:
-            later["all"] = True
+            later["registry"] = True
         else:
             later["groups"] |= only
         if later["handle"] is None:
@@ -641,23 +780,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 REGISTRY_REFRESH_DELAY, run_later_update
             )
 
-    def plan_retry() -> None:
-        """Ask for one more update when the last scan of a group failed.
-
-        A dashboard load that fails now can work some seconds later. The tries stop after
-        UPDATE_RETRIES in a row. The count starts again when no group has such a scan.
-        """
-        if not trouble:
-            retries["left"] = UPDATE_RETRIES
-        elif retries["left"] > 0:
-            retries["left"] -= 1
-            request_later_update(set(trouble))
-
     @callback
     def registry_updated(event: Event) -> None:
         """A registry changed: a card that finds its entities there can show other ones.
 
-        The registries change in bursts, so one update follows all changes of
+        The registries change in bursts, so one update follows the changes of
         REGISTRY_REFRESH_DELAY seconds.
         """
         request_later_update()
@@ -675,7 +802,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await update_pages()
 
     async def preview(call: ServiceCall) -> ServiceResponse:
-        response: list[dict[str, Any]] = []
+        response: list[JsonValueType] = []
         for group in groups():
             options = dict(group.options)
             names = []
@@ -771,7 +898,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             fault,
         )
     # The pages that connected before this setup hold a subscription to all states.
-    hass.async_create_task(adopt_unfiltered())
+    hass.async_create_task(adopt_unfiltered(None, {}, set()))
     return True
 
 

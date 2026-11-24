@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import gzip
+import json
 import logging
 import os
 import re
@@ -50,11 +51,12 @@ _CUSTOM_TYPE = re.compile(r"custom:([A-Za-z0-9_.\-]+)")
 # "custom:xxx" inside a longer string names a card in two forms. The first form follows a
 # key "type", with quotes or with none, as in YAML text. The second form is a quoted text
 # by itself, such as the value that a template returns. The same words in plain text, in
-# neither form, name no card. Group 1 is the quote of the second form, and group 2 is the
-# type.
+# neither form, name no card. The key is "type" or a name that ends in "_type", and not
+# a longer word such as "prototype". Group 1 is the quote of the second form, and group
+# 2 is the type, which can hold a dot as the name of a custom element can.
 _CUSTOM_TYPE_INSIDE = re.compile(
-    r"""(?:type["']?\s*[:=]\s*["']?|(["'`]))"""
-    r"""custom:([a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)(?(1)\1)"""
+    r"""(?:(?<![A-Za-z0-9])type["']?\s*[:=]\s*["']?|(["'`]))"""
+    r"""custom:([a-z0-9](?:[a-z0-9_.-]*[a-z0-9])?)(?(1)\1)"""
 )
 # A dashed name this file actually registers, not every hyphenated token it
 # mentions. Mentions of another card ("button-card" inside an unrelated file)
@@ -124,25 +126,31 @@ _GENERIC_STEMS = frozenset(
         "scripts",
     }
 )
-# The keys of the warnings that the log already holds.
-_WARNED: set[tuple[Any, ...]] = set()
-# The dashboard that the current task loads now: its URL path, "active" while the load
-# runs, and "fired" when the dashboard's update event came during the load. Each task has
-# its own value, so an event from the load of another task does not count.
+# The value of the last warning for each subject, such as the error text of a dashboard
+# that cannot be loaded.
+_WARNED: dict[tuple[Any, ...], Any] = {}
+# The dashboard that the current task loads now: its URL path, and "active" while the
+# load runs. A task that starts during the load holds the same record, and "active" is
+# False for it when the load is over. A task that runs beside the load has no record.
 _OWN_LOAD: ContextVar[dict[str, Any] | None] = ContextVar(
     "lite_resources_own_load", default=None
 )
-# The configuration that the last load by this integration gave, by the URL path.
+# What the last load by this integration gave for each URL path: _NO_CONFIG,
+# _LOAD_FAILED, or the configuration with its text. _ANNOUNCED stands for an update
+# event from another task with no load by this integration after it.
 _SEEN: dict[Any, Any] = {}
 _NOT_SEEN = object()
+_NO_CONFIG = object()
+_LOAD_FAILED = object()
+_ANNOUNCED = object()
 # The functions that async_listen_changes added.
 _CHANGE_LISTENERS: list[Callable[[Any], None]] = []
 
 
-def _warn_once(key: tuple[Any, ...], message: str, *args: Any) -> None:
-    """Log a warning one time. A warning at each request from each page hides a new one."""
-    if key not in _WARNED:
-        _WARNED.add(key)
+def _warn_change(key: tuple[Any, ...], value: Any, message: str, *args: Any) -> None:
+    """Log a warning when its value is new. A warning at each request hides a new one."""
+    if _WARNED.get(key, _NOT_SEEN) != value:
+        _WARNED[key] = value
         _LOGGER.warning(message, *args)
 
 
@@ -376,7 +384,11 @@ async def async_all_resources(hass: HomeAssistant) -> list[dict[str, Any]]:
     """Return every configured dashboard resource, as core would send it."""
     resources = hass.data[LOVELACE_DATA].resources
     if not resources.loaded:
-        await resources.async_load()
+        # Only the stored collection can be not loaded yet. The YAML collection is
+        # loaded from its start, and it has no load function.
+        load = getattr(resources, "async_load", None)
+        if load is not None:
+            await load()
         resources.loaded = True
     return list(resources.async_items() or [])
 
@@ -454,35 +466,31 @@ async def _async_dashboard_scans(
         else:
             dashboard = dashboards.get(key)
         if dashboard is None:
-            _warn_once(("no dashboard", key), "Dashboard %s not found", key)
+            _warn_change(("no dashboard", key), True, "Dashboard %s not found", key)
             continue
-        _WARNED.discard(("no dashboard", key))
+        _WARNED.pop(("no dashboard", key), None)
         url_path = getattr(
             dashboard, "url_path", None if key == DEFAULT_DASHBOARD else key
         )
-        load = {"url_path": url_path, "active": True, "fired": False}
+        load = {"url_path": url_path, "active": True}
         token = _OWN_LOAD.set(load)
         try:
             config = await dashboard.async_load(False)
         except ConfigNotFound:  # no stored configuration: the browser makes the cards
             without_config.append(key)
-            continue
-        except HomeAssistantError as err:
-            # Such as a YAML dashboard with a syntax error.
-            failed[key] = str(err)
-            continue
+            state: Any = _NO_CONFIG
+        except (HomeAssistantError, OSError) as err:
+            # Such as a YAML dashboard with a syntax error, or one whose file is gone.
+            failed[key] = str(err) or type(err).__name__
+            state = _LOAD_FAILED
+        else:
+            scans.append(scan_dashboard(key, config))
+            state = config
         finally:
-            # A task that started during the load holds a copy of the record.
+            # A task that started during the load holds the same record.
             load["active"] = False
             _OWN_LOAD.reset(token)
-        previous = _SEEN.get(url_path, _NOT_SEEN)
-        _SEEN[url_path] = config
-        if load["fired"] and previous is not config and previous != config:
-            # This load found the change, so no other event tells the open pages. A file
-            # that fires at each load gives the same configuration, and stops here.
-            for listener in _CHANGE_LISTENERS.copy():
-                listener(url_path)
-        scans.append(scan_dashboard(key, config))
+        _note_state(url_path, state)
     if not scans and not without_config:
         if failed:
             raise _load_failure(failed)
@@ -499,26 +507,84 @@ def _load_failure(failed: dict[str, str]) -> CannotNarrow:
     return CannotNarrow(f"the dashboard {key} cannot be loaded: {error}", retry=True)
 
 
-def own_load_fired(url_path: str | None) -> bool:
-    """True when the update event of this dashboard came from this task's own load of it.
+def _note_state(url_path: str | None, state: Any) -> None:
+    """Keep what a load of a dashboard gave, and call the change listeners when it is new.
+
+    `state` is the configuration, _NO_CONFIG or _LOAD_FAILED. Each load by this
+    integration comes here, whether an event came with it or not. So the listeners hear
+    of each change that this integration sees: a changed YAML file that a scan finds
+    first, and a dashboard that loads again after a fault. The first load of a dashboard
+    is no change. A load that fails is none either: the scan that found it tries again,
+    and the pages of each other group keep their entities until the dashboard loads. A
+    file that fires its event at each load gives the same configuration each time, so it
+    calls no listener. The first load after `note_event` calls none either, because the
+    event of that call started an update already.
+    """
+    previous = _SEEN.get(url_path, _NOT_SEEN)
+    if state is _LOAD_FAILED:
+        _SEEN[url_path] = state
+        return
+    if state is _NO_CONFIG:
+        changed = previous is not state
+        _SEEN[url_path] = state
+    elif isinstance(previous, tuple) and previous[0] is state:
+        # The same object as at the last load: a stored dashboard with no new save, or
+        # a YAML dashboard from the cache of Home Assistant.
+        return
+    else:
+        text = _configuration_text(state)
+        changed = not (isinstance(previous, tuple) and previous[1] == text)
+        _SEEN[url_path] = (state, text)
+    if changed and previous is not _NOT_SEEN and previous is not _ANNOUNCED:
+        for listener in _CHANGE_LISTENERS.copy():
+            listener(url_path)
+
+
+def note_event(url_path: str | None) -> None:
+    """Record an update event of this dashboard that came from another task.
+
+    Such an event comes from a save, or from the load of a browser that found a changed
+    YAML file. The caller starts an update of each group with the dashboard. The scans
+    of that update load the configuration that the event announced, so the first load
+    after the event is no second change. A change after that load is a change again.
+    """
+    _SEEN[url_path] = _ANNOUNCED
+
+
+def _configuration_text(config: Any) -> str:
+    """Return a text that is equal for two loads of the same configuration.
+
+    Two loads of one YAML file give two objects. Their comparison as values fails for a
+    value that is not equal to itself, such as a NaN number, so the texts are compared.
+    """
+    try:
+        return json.dumps(config, default=str)
+    except (TypeError, ValueError):  # such as a key that JSON cannot hold
+        return repr(config)
+
+
+def is_own_load(url_path: str | None) -> bool:
+    """True while a scan in the current task loads the dashboard with this URL path.
 
     Home Assistant fires the update event of a YAML dashboard inside the load that finds
-    the changed file, and it calls each listener at once. So a listener that runs in the
-    task of a scan, while that scan loads the dashboard, sees the event of that load. The
-    scan then compares the new configuration with the last one, and calls the change
-    listeners when the two differ. An event from the load of another task gives False.
+    the changed file, and it calls each listener at once, in the task of that load. So a
+    listener that gets True here sees the event of the scan's own load. The scan itself
+    reports the change, through the change listeners. An event from the load of another
+    task gives False.
     """
     load = _OWN_LOAD.get()
-    if load is None or not load["active"] or load["url_path"] != url_path:
-        return False
-    load["fired"] = True
-    return True
+    return load is not None and load["active"] and load["url_path"] == url_path
+
+
+def forget_warnings() -> None:
+    """Forget each warning of this module, so that a new setup logs its warnings again."""
+    _WARNED.clear()
 
 
 def async_listen_changes(listener: Callable[[Any], None]) -> Callable[[], None]:
-    """Call the listener with the URL path of a dashboard whose own load found a change.
+    """Call the listener with the URL path of a dashboard whose state is new at a load.
 
-    Return the function that removes the listener.
+    `_note_state` says what counts as new. Return the function that removes the listener.
     """
     _CHANGE_LISTENERS.append(listener)
 
@@ -551,8 +617,8 @@ async def async_dashboard_entities(
         hass, list(options.get(CONF_DASHBOARDS, []))
     )
     if failed:
-        # The page can open this dashboard after a correction, and no event is sure to
-        # come then. So the group gets all states, and the caller tries again later.
+        # A page can open this dashboard after a correction, so a set with no entity of
+        # that dashboard is no result. The caller tries again later.
         raise _load_failure(failed)
     if without_config:
         raise CannotNarrow(
@@ -667,17 +733,19 @@ async def async_resolve(
         hass, result.dashboards
     )
     # A dashboard that cannot be loaded shows no card in the browser, so its resources
-    # are not counted. The warning comes again when the error text changes.
-    for key, error in failed.items():
-        _warn_once(
-            ("load failed", key, error),
-            "Dashboard %s cannot be loaded, so the resource list leaves it out: %s",
-            key,
-            error,
-        )
-    loaded = set(result.dashboards) - set(failed)
-    for warned in [w for w in _WARNED if w[0] == "load failed" and w[1] in loaded]:
-        _WARNED.discard(warned)
+    # are not counted. The warning comes again when the error text changes, and when
+    # the error comes back after a load that worked.
+    for key in result.dashboards:
+        if key in failed:
+            _warn_change(
+                ("load failed", key),
+                failed[key],
+                "Dashboard %s cannot be loaded, so the resource list leaves it out: %s",
+                key,
+                failed[key],
+            )
+        else:
+            _WARNED.pop(("load failed", key), None)
     for scan in scans:
         needed.update(scan.custom_types())
         named = scan.keys | scan.strings

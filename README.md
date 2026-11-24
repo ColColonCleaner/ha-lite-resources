@@ -72,14 +72,17 @@ Some dashboards do not say which entities a panel needs. A group with such a das
 - A dashboard with no stored configuration. Home Assistant generates such a dashboard in the browser, such as the default dashboard before its first edit.
 - A dashboard, a view or a section with a **strategy**. The browser makes its cards. This holds also for a section in the sidebar of a view, and for a section inside another section.
 - The **home-summary** card, the **energy**, **water** and **power** cards, and the badges **power-total**, **gas-total** and **water-total**. They take their entities from all states or from the energy settings.
-- A dashboard that Home Assistant cannot load, such as a YAML dashboard with a syntax error. A panel can open that dashboard after you correct the file, so the group gets all states until the scan works again.
-- A scan that takes longer than 30 seconds, such as the load of a YAML dashboard from a share that does not answer. A panel that connects in that time gets all states.
-
-For the last two, Lite Resources tries the scan again by itself: 6 times, with 10 seconds between the tries. When a try works, each open panel of the group is narrowed. After the last try, the group is narrowed at the next change that the section *When a dashboard changes* names, or when one of its panels connects again.
 
 On a slow panel, all states are the load that this integration exists to remove. When you save such a card to a dashboard in a group, each open panel in that group gets all states at once. So look at the log, or at the preview, after you change a dashboard in a group.
 
 A custom strategy that makes custom cards names no card in the stored dashboard. Add each such card's resource under *Always include*.
+
+Two faults give all states only to a panel that connects during the fault, because no scan says which entities that panel needs. A panel that is open at that time keeps the entities that it has. The log gives each new reason one time.
+
+- A dashboard that Home Assistant cannot load, such as a YAML dashboard with a syntax error. Lite Resources tries the scan again by itself, about 10 seconds after each failed scan. After 7 failed scans in a row, the log says so. The next try then comes at the next change that the section *When a dashboard changes* names, or when one of the group's panels connects.
+- A scan that takes longer than 30 seconds, such as the load of a YAML dashboard from a share that does not answer. While that scan runs, Lite Resources starts no second scan of the group, unless you change the group. When the scan ends, the group gets a new scan.
+
+When a scan works again, each open panel of the group is narrowed, and each gets the group's entities of that time.
 
 Everyone else gets Home Assistant's normal behaviour. Remove the integration and everything is exactly as before: each open panel gets all states again at once.
 
@@ -99,7 +102,9 @@ Design the dashboards as a normal user, with every resource loaded. When you sav
 
 A change to a group, such as a new user or a new dashboard, reaches the open panels the same way. So does a change to the entity, device or area registry, about 10 seconds after it: a new schedule, or an entity that moves into an area card's area.
 
-Two changes do not reach an open panel by themselves. Home Assistant reads the file of a YAML dashboard again only when something loads that dashboard. So a change to the file reaches the open panels at the next such load. That load comes when a panel or a browser opens the dashboard, or at the next change above. Each open panel of each group with that dashboard then gets the new entities. A new member of a light group reaches a panel at its next page load or at the next change above. So does a new entity that a schedule controls.
+Three changes do not reach an open panel by themselves. The first is a change to the file of a YAML dashboard. Home Assistant reads that file again only when something loads the dashboard. So the change reaches the open panels at the next such load. That load comes when a panel or a browser opens the dashboard, or at the next change above. Each open panel of each group with that dashboard then gets the new entities.
+
+The second is a new member of a light group. The third is a new entity that a schedule controls. Each of the two reaches a panel at its next page load or at the next change above.
 
 ### After a Home Assistant restart
 
@@ -211,7 +216,7 @@ No. Only the dashboard's resource list and the live state subscription are chang
 The page **Settings → Dashboards → Resources** reads the same resource list, so it shows only the group's resources. Use another user to manage the resources.
 
 **What happens if something goes wrong?**
-If the work on the trimmed list fails with an error, Lite Resources sends the full list and logs the error. The same holds for the states.
+If the work on the trimmed list fails with an error, or takes longer than 30 seconds, Lite Resources sends the full list and logs the reason. If the entity scan fails, a panel that connects gets all states, and an open panel keeps its entities. The section *When a group's states are not narrowed* says what comes next.
 
 Some gaps give no error. A card type that no file seems to provide is in the log one time, and `lite_resources.preview` shows it. A resource can work by a side effect, such as an icon set or a mod that only a theme uses. Lite Resources does not send such a resource until you add it under *Always include*.
 
@@ -229,6 +234,15 @@ mypy
 ```
 
 The tests need Python 3.12 or later and the package `voluptuous`. They run against stand-ins, so they need no Home Assistant installation. The static checks and the format check need ruff 0.17.5, and the type checks need mypy 2.4.1. Those are the versions that the Validate workflow installs. `ruff.toml` and `mypy.ini` hold the settings. To give changed code the format, run `ruff format .`.
+
+The command `mypy` reads no Home Assistant, so its result is the same on each machine. It checks the calls inside the integration, and each name from Home Assistant has the type `Any` there. A second type check reads the types of Home Assistant from the source of its core. It needs a clone of that source at the tag of your Home Assistant version, and it runs nothing of it:
+
+```bash
+git clone --depth 1 --branch 2026.11.2 https://github.com/home-assistant/core ../home-assistant-core
+MYPYPATH=../home-assistant-core mypy --config-file mypy-homeassistant.ini
+```
+
+On Windows, set `MYPYPATH` with your shell's syntax. The Validate workflow runs both type checks.
 
 ## Releasing
 

@@ -56,10 +56,18 @@ async def _dashboard_entities(hass, options, include_missing=False) -> set[str]:
     load from a slow share does. `hass.scan_error` makes it raise that error.
     """
     hass.include_missing.append(include_missing)
+    hass.scans.append(tuple(options["dashboards"]))
     for _turn in range(hass.scan_suspends):
         await asyncio.sleep(0)
     if hass.scan_seconds:
         await asyncio.sleep(hass.scan_seconds)
+    for key in options["dashboards"]:
+        # A dashboard whose load hangs until the test opens its gate, and a dashboard
+        # whose load fails.
+        if key in hass.scan_gates:
+            await hass.scan_gates[key].wait()
+        if key in hass.scan_errors:
+            raise hass.scan_errors[key]
     if hass.scan_error is not None:
         raise hass.scan_error
     found = set(options.get("extra_entities", []))
@@ -77,6 +85,8 @@ async def _resolve(hass, options, cache) -> SimpleNamespace:
     """
     for _turn in range(hass.resolve_suspends):
         await asyncio.sleep(0)
+    if hass.resolve_seconds:
+        await asyncio.sleep(hass.resolve_seconds)
     if hass.resolve_error is not None:
         raise hass.resolve_error
     gaps = dict(hass.resolve_gaps)
@@ -273,6 +283,12 @@ class _Hass:
         self.scan_suspends = 0
         self.scan_seconds = 0.0
         self.scan_error: Exception | None = None
+        # By the key of a dashboard: an error for each scan that reads it, and a gate
+        # that holds each scan that reads it. `scans` holds the dashboards of each scan.
+        self.scan_errors: dict[str, Exception] = {}
+        self.scan_gates: dict[str, asyncio.Event] = {}
+        self.scans: list[tuple[str, ...]] = []
+        self.resolve_seconds = 0.0
         self.handler_error: Exception | None = None
         self.narrowed_handler_error: Exception | None = None
         self.resolve_error: Exception | None = None
@@ -306,18 +322,29 @@ class _Hass:
         self.tasks.append(task)
         return task
 
+    def async_create_background_task(self, coro, name, eager_start=True):
+        """As in Home Assistant: a task with a name that the start does not wait for."""
+        return self.async_create_task(coro, name, eager_start)
+
     async def drain(self) -> None:
         """Wait for each task that a handler or a listener started.
 
-        The error of an entity scan goes to the code that waits for the scan, so it is
-        not raised here. Each other error fails the test.
+        The error of a scan goes to the code that waits for the scan, so it is not
+        raised here. Each other error fails the test.
         """
         while self.tasks:
             task = self.tasks.pop(0)
-            if task.get_name().endswith("entity scan"):
+            if task.get_name().endswith(" scan"):
                 await asyncio.gather(task, return_exceptions=True)
             else:
                 await task
+
+
+def _reset_resolver() -> None:
+    """Forget what the resolver module keeps from one test to the next."""
+    _resolver._WARNED.clear()
+    _resolver._SEEN.clear()
+    _resolver._CHANGE_LISTENERS.clear()
 
 
 def _run_unload(entry) -> None:
@@ -364,6 +391,7 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
     """Two groups, each with its own users and dashboards."""
 
     async def asyncSetUp(self) -> None:
+        _reset_resolver()
         self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
         _entry.async_dashboard_entities = _dashboard_entities
         _entry.async_resolve = _resolve
@@ -553,6 +581,7 @@ class EarlyPageTest(unittest.IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self) -> None:
+        _reset_resolver()
         self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
         _entry.async_dashboard_entities = _dashboard_entities
         _entry.async_resolve = _resolve
@@ -649,6 +678,7 @@ class StartupTest(unittest.IsolatedAsyncioTestCase):
     """A page that connects while Home Assistant starts gets its full set after the start."""
 
     async def asyncSetUp(self) -> None:
+        _reset_resolver()
         self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
         _entry.async_dashboard_entities = _dashboard_entities
         _entry.async_resolve = _resolve
@@ -714,6 +744,7 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
     """An open page keeps a state stream through each failure and each change to the setup."""
 
     async def asyncSetUp(self) -> None:
+        _reset_resolver()
         self._saved = (_entry.async_dashboard_entities, _entry.async_resolve)
         _entry.async_dashboard_entities = _dashboard_entities
         _entry.async_resolve = _resolve
@@ -903,21 +934,93 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.hass.include_missing), scans)
 
     async def test_registry_change_narrows_a_page_that_holds_all_states(self) -> None:
-        # The dashboard of the page names its entities again, and no dashboard event came.
-        self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
-        with self.assertLogs(_entry._LOGGER, level="WARNING"):
-            await self._open_page("u-w1")
-        self.assertIsNone(self._live("u-w1")[0]["entity_ids"])
-        self.hass.scan_error = None
-        saved = _entry.REGISTRY_REFRESH_DELAY
-        _entry.REGISTRY_REFRESH_DELAY = 0
+        # The scan failed more times than the later tries allow, so no timer runs.
+        saved = (_entry.REGISTRY_REFRESH_DELAY, _entry.UPDATE_RETRIES)
+        _entry.REGISTRY_REFRESH_DELAY, _entry.UPDATE_RETRIES = 0, 0
         try:
+            self.hass.scan_error = RuntimeError("the scan failed")
+            with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+                await self._open_page("u-w1")
+                await asyncio.sleep(0.01)
+                await self.hass.drain()
+            self.assertIn("in a row", logs.records[-1].getMessage())
+            self.assertIsNone(self._live("u-w1")[0]["entity_ids"])
+            self.assertEqual(len(self.hass.scans), 1)
+            # The scan works again, and no dashboard event comes.
+            self.hass.scan_error = None
             self.hass.bus.fire("entity_registry_updated", {"action": "update"})
             await asyncio.sleep(0.01)
             await self.hass.drain()
         finally:
-            _entry.REGISTRY_REFRESH_DELAY = saved
+            _entry.REGISTRY_REFRESH_DELAY, _entry.UPDATE_RETRIES = saved
         self.assertEqual(self._live("u-w1")[0]["entity_ids"], ["sensor.a", "sensor.b"])
+
+    async def test_registry_change_scans_no_group_that_cannot_be_narrowed(self) -> None:
+        # A strategy dashboard: a registry change cannot give its group an entity set.
+        self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
+        with self.assertLogs(_entry._LOGGER, level="WARNING"):
+            await self._open_page("u-w1")
+        scans = len(self.hass.scans)
+        saved = _entry.REGISTRY_REFRESH_DELAY
+        _entry.REGISTRY_REFRESH_DELAY = 0
+        try:
+            for _burst in range(5):
+                self.hass.bus.fire("entity_registry_updated", {"action": "update"})
+                await asyncio.sleep(0.01)
+                await self.hass.drain()
+        finally:
+            _entry.REGISTRY_REFRESH_DELAY = saved
+        self.assertEqual(len(self.hass.scans), scans)
+        # A change to the dashboard gives the group a scan, and the page its entities.
+        self.hass.scan_error = None
+        self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+        await self.hass.drain()
+        self.assertEqual(self._live("u-w1")[0]["entity_ids"], ["sensor.a", "sensor.b"])
+
+    async def test_reason_that_comes_back_after_another_one_is_in_the_log_again(
+        self,
+    ) -> None:
+        await self._open_page("u-w1")
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            for reason in ("an error in line 5", "an error in line 9") * 2:
+                self.hass.scan_error = _entry.CannotNarrow(reason)
+                self.hass.bus.fire(
+                    "lovelace_updated", {"url_path": "dashboard-workshop"}
+                )
+                await self.hass.drain()
+        # line 5, line 9, line 5 and line 9: each change of the reason is one warning.
+        self.assertEqual(len(logs.records), 4)
+
+    async def test_resources_request_that_waits_at_a_reload_gets_the_reduced_list(
+        self,
+    ) -> None:
+        self.hass.resolve_suspends = 2
+        connection = _Connection("u-w1")
+        handler, _schema = self.hass.data["websocket_api"]["lovelace/resources"]
+        request = asyncio.ensure_future(
+            handler(self.hass, connection, {"id": 1, "type": "lovelace/resources"})
+        )
+        await asyncio.sleep(0)
+        # The operator reloads the integration while the scan runs.
+        _run_unload(self.entry)
+        entry = _Entry(subentries=list(self.entry.subentries.values()))
+        await _entry.async_setup_entry(self.hass, entry)
+        await request
+        await self.hass.drain()
+        self.assertEqual(
+            connection.results, [(1, [{"url": "/local/dashboard-workshop.js"}])]
+        )
+
+    async def test_resource_scan_over_the_time_limit_gives_the_full_list(self) -> None:
+        saved = _entry.SCAN_TIMEOUT
+        _entry.SCAN_TIMEOUT = 0.05
+        try:
+            self.hass.resolve_seconds = 0.2
+            with self.assertLogs(_entry._LOGGER, level="WARNING"):
+                self.assertEqual(await self._resources("u-w1"), "every resource")
+            await self.hass.drain()
+        finally:
+            _entry.SCAN_TIMEOUT = saved
 
     async def test_preview_is_for_administrators_only(self) -> None:
         preview = self.hass.services.registered[("lite_resources", "preview")]
@@ -1016,6 +1119,28 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         preview = self.hass.services.registered[("lite_resources", "preview")]
         self.assertEqual((await preview(_call()))["open_pages_with_narrowed_states"], 1)
 
+    async def test_page_whose_scan_is_open_at_the_unload_goes_to_a_later_handler(
+        self,
+    ) -> None:
+        calls = []
+
+        def other_handler(hass, connection, msg) -> None:
+            """A handler that another integration registered after this one."""
+            calls.append((connection, msg["id"]))
+
+        self.hass.scan_suspends = 3
+        kiosk = _Connection("u-w1")
+        _subscribe(self.hass, kiosk)
+        commands = self.hass.data["websocket_api"]
+        commands["subscribe_entities"] = (other_handler, _states_schema)
+        with self.assertLogs(_entry._LOGGER, level="WARNING"):
+            _run_unload(self.entry)
+            await self.hass.drain()
+        # The page goes one time to the handler in the table, which is not the handler
+        # of this setup. So Home Assistant's handler gets no call from this setup.
+        self.assertEqual(calls, [(kiosk, 5)])
+        self.assertEqual(self._calls("u-w1"), [])
+
     async def test_resources_request_that_waits_at_the_unload_gets_the_full_list(
         self,
     ) -> None:
@@ -1040,27 +1165,35 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
     async def test_scan_over_the_time_limit_gives_a_new_page_all_states_and_a_later_try(
         self,
     ) -> None:
-        saved = (_entry.SCAN_TIMEOUT, _entry.REGISTRY_REFRESH_DELAY)
-        _entry.SCAN_TIMEOUT, _entry.REGISTRY_REFRESH_DELAY = 0.05, 0.05
+        saved = _entry.SCAN_TIMEOUT
+        _entry.SCAN_TIMEOUT = 0.05
         try:
             # As the load of a YAML dashboard from a slow share.
             self.hass.scan_seconds = 0.3
             kiosk = _Connection("u-w1")
-            with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
                 _subscribe(self.hass, kiosk)
                 await asyncio.sleep(0.15)
-            (live,) = self._live("u-w1")
-            self.assertIsNone(live["entity_ids"])
-            # The share answers again. No event comes, and a later try narrows the page.
+                # A second page of the group does not wait for the same scan again.
+                second = _Connection("u-w2")
+                _subscribe(self.hass, second, 6)
+                await asyncio.sleep(0.01)
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("runs longer than", logs.records[0].getMessage())
+            self.assertIsNone(self._live("u-w1")[0]["entity_ids"])
+            self.assertIsNone(self._live("u-w2")[0]["entity_ids"])
+            self.assertEqual(len(self.hass.scans), 1)
+            # The share answers again. No event comes and no timer runs here: the end
+            # of the slow scan starts the update that narrows both pages.
             self.hass.scan_seconds = 0
-            with self.assertLogs(_entry._LOGGER, level="ERROR"):
-                await asyncio.sleep(0.6)
-                await self.hass.drain()
+            await asyncio.sleep(0.4)
+            await self.hass.drain()
         finally:
-            _entry.SCAN_TIMEOUT, _entry.REGISTRY_REFRESH_DELAY = saved
-        (live,) = self._live("u-w1")
-        self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.b"])
+            _entry.SCAN_TIMEOUT = saved
+        self.assertEqual(self._live("u-w1")[0]["entity_ids"], ["sensor.a", "sensor.b"])
+        self.assertEqual(self._live("u-w2")[0]["entity_ids"], ["sensor.a", "sensor.b"])
         self.assertEqual(kiosk.results, [(5, None)])
+        self.assertEqual(len(self.hass.scans), 2)
 
     async def test_scan_over_the_time_limit_leaves_an_open_page_as_it_is(self) -> None:
         await self._open_page("u-w1")
@@ -1072,18 +1205,17 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
                 "sensor.a",
                 "sensor.c",
             }
-            with self.assertLogs(_entry._LOGGER, level="ERROR"):
+            with self.assertLogs(_entry._LOGGER, level="WARNING"):
                 self.hass.bus.fire(
                     "lovelace_updated", {"url_path": "dashboard-workshop"}
                 )
                 await asyncio.sleep(0.2)
             (live,) = self._live("u-w1")
             self.assertEqual(live["entity_ids"], ["sensor.a", "sensor.b"])
-            # The update is over. When the slow scan ends, the next change starts a new
-            # scan, and the page gets its new entities.
+            # The update is over. The end of the slow scan starts a new update, with
+            # no other event, and the page gets its new entities.
             self.hass.scan_seconds = 0
-            await asyncio.sleep(0.2)
-            self.hass.bus.fire("lovelace_updated", {"url_path": "dashboard-workshop"})
+            await asyncio.sleep(0.3)
             await self.hass.drain()
         finally:
             _entry.SCAN_TIMEOUT = saved
@@ -1258,6 +1390,151 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
             await _entry.async_setup_entry(hass, _Entry())
             await hass.drain()
         self.assertIn("keeps all states", logs.records[0].getMessage())
+
+
+class LaterTriesTest(unittest.IsolatedAsyncioTestCase):
+    """Two groups: a fault in the scan of one group does not touch the other group."""
+
+    async def asyncSetUp(self) -> None:
+        _reset_resolver()
+        self._saved = (
+            _entry.async_dashboard_entities,
+            _entry.async_resolve,
+            _entry.REGISTRY_REFRESH_DELAY,
+            _entry.SCAN_TIMEOUT,
+        )
+        _entry.async_dashboard_entities = _dashboard_entities
+        _entry.async_resolve = _resolve
+        _entry.REGISTRY_REFRESH_DELAY = 0.05
+        self.hass = _Hass()
+        self.workshop = _group(
+            "Workshop kiosks", ["u-w1", "u-w2"], ["dashboard-workshop"]
+        )
+        self.kitchen = _group("Kitchen tablet", ["u-k"], ["main-dashboard"])
+        self.entry = _Entry(subentries=[self.workshop, self.kitchen])
+        await _entry.async_setup_entry(self.hass, self.entry)
+        await self.hass.drain()
+
+    async def asyncTearDown(self) -> None:
+        (
+            _entry.async_dashboard_entities,
+            _entry.async_resolve,
+            _entry.REGISTRY_REFRESH_DELAY,
+            _entry.SCAN_TIMEOUT,
+        ) = self._saved
+        _run_unload(self.entry)
+        await self.hass.drain()
+
+    def _scans_of(self, dashboard: str) -> int:
+        return self.hass.scans.count((dashboard,))
+
+    def _ids(self, user_id: str):
+        (live,) = [
+            call
+            for call in self.hass.core_subscriptions
+            if call["user"] == user_id and not call["ended"]
+        ]
+        return live["entity_ids"]
+
+    async def test_pages_of_another_group_use_no_try_of_a_group_with_a_fault(
+        self,
+    ) -> None:
+        self.hass.scan_errors["main-dashboard"] = RuntimeError("the load failed")
+        with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
+            _subscribe(self.hass, _Connection("u-k"), 7)
+            # Six pages of the workshop group load in the time before the first try.
+            for number in range(6):
+                _subscribe(self.hass, _Connection("u-w2"), 10 + number)
+            await asyncio.sleep(0.6)
+            await self.hass.drain()
+        self.assertEqual(self._scans_of("main-dashboard"), 1 + _entry.UPDATE_RETRIES)
+        self.assertEqual(self._scans_of("dashboard-workshop"), 6)
+        # The log says one time that no further try runs.
+        ended = [r for r in logs.records if "in a row" in r.getMessage()]
+        self.assertEqual(len(ended), 1)
+        self.assertIsNone(self._ids("u-k"))
+
+    async def test_fault_that_lasts_in_one_group_leaves_the_tries_of_another_group(
+        self,
+    ) -> None:
+        self.hass.scan_errors["main-dashboard"] = RuntimeError("the load failed")
+        with self.assertLogs(_entry._LOGGER, level="WARNING"):
+            _subscribe(self.hass, _Connection("u-k"), 7)
+            await asyncio.sleep(0.6)
+            await self.hass.drain()
+            self.assertEqual(
+                self._scans_of("main-dashboard"), 1 + _entry.UPDATE_RETRIES
+            )
+            # The kitchen tries are used. Now the scan of the workshop group fails one time.
+            self.hass.scan_errors["dashboard-workshop"] = RuntimeError("one fault")
+            _subscribe(self.hass, _Connection("u-w1"))
+            self.assertIsNone(self._ids("u-w1"))
+            del self.hass.scan_errors["dashboard-workshop"]
+            await asyncio.sleep(0.2)
+            await self.hass.drain()
+        # The workshop group has its own tries, so its kiosk is narrowed.
+        self.assertEqual(self._ids("u-w1"), ["sensor.a", "sensor.b"])
+        self.assertEqual(self._scans_of("main-dashboard"), 1 + _entry.UPDATE_RETRIES)
+
+    async def test_changed_group_does_not_wait_for_the_scan_of_its_old_dashboards(
+        self,
+    ) -> None:
+        _entry.SCAN_TIMEOUT = 0.05
+        gate = self.hass.scan_gates["dashboard-workshop"] = asyncio.Event()
+        try:
+            with self.assertLogs(_entry._LOGGER, level="WARNING"):
+                _subscribe(self.hass, _Connection("u-w1"))
+                await asyncio.sleep(0.1)
+            self.assertIsNone(self._ids("u-w1"))
+            # The operator takes the dashboard that hangs out of the group.
+            changed = ConfigSubentry(
+                data={
+                    "users": ["u-w1", "u-w2"],
+                    "dashboards": ["main-dashboard"],
+                    "filter_states": True,
+                },
+                subentry_type="group",
+                title="Workshop kiosks",
+                unique_id=None,
+                subentry_id=self.workshop.subentry_id,
+            )
+            self.entry.subentries = {
+                **self.entry.subentries,
+                changed.subentry_id: changed,
+            }
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            for listener in self.entry.update_listeners:
+                await listener(self.hass, self.entry)
+            # No wait for the old scan: the time limit of this test is 0.05 seconds.
+            self.assertLess(loop.time() - started, 0.04)
+            self.assertEqual(self._ids("u-w1"), ["light.k", "sensor.b"])
+        finally:
+            gate.set()
+            await self.hass.drain()
+        self.assertEqual(self._ids("u-w1"), ["light.k", "sensor.b"])
+
+    async def test_scan_that_ends_in_an_error_after_its_time_limit_starts_an_update(
+        self,
+    ) -> None:
+        _entry.SCAN_TIMEOUT = 0.05
+        gate = self.hass.scan_gates["dashboard-workshop"] = asyncio.Event()
+        self.hass.scan_errors["dashboard-workshop"] = RuntimeError("the share is gone")
+        with self.assertLogs(_entry._LOGGER, level="WARNING"):
+            _subscribe(self.hass, _Connection("u-w1"))
+            await asyncio.sleep(0.1)
+            self.assertIsNone(self._ids("u-w1"))
+            self.assertEqual(self._scans_of("dashboard-workshop"), 1)
+            # The load ends with an error. No timer waits at this time, so the second
+            # scan comes from the end of the first one.
+            gate.set()
+            await self.hass.drain()
+            self.assertEqual(self._scans_of("dashboard-workshop"), 2)
+            # The second scan failed also, so a later try follows. The share answers again.
+            del self.hass.scan_errors["dashboard-workshop"]
+            await asyncio.sleep(0.2)
+            await self.hass.drain()
+        self.assertEqual(self._ids("u-w1"), ["sensor.a", "sensor.b"])
 
 
 class SetupWithoutLovelaceTest(unittest.IsolatedAsyncioTestCase):

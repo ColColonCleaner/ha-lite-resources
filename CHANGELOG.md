@@ -2,6 +2,88 @@
 
 ## Unreleased
 
+## 0.3.9 - 2026-11-24
+
+A fourth independent review read the changes of 0.3.8 and the two commits with the static checks. It gave 22 findings: no critical one, no high one, 4 medium and 18 low. Each fault in behaviour needs a scan that fails, a scan that hangs or a YAML dashboard. The review found no fault on the path of a panel whose dashboards are stored in the UI and whose scan works. This version corrects each finding, and it states each limit that stays. It also adds a second type check, which reads the types of Home Assistant from the source of its core.
+
+### The later tries after a failed scan
+
+- **Each group has its own count of failed scans.** 0.3.8 held one count for all groups, and each page load of each group lowered it while one group had a fault. Six page loads of one group in 10 seconds used the tries of another group, which then got 1 try and not 6. Now a group's count changes only when a scan of that group fails or works.
+- **A fault that lasts in one group no longer stops the tries of another group.** The one count of 0.3.8 started again only when no group had a fault. So a dashboard that stayed wrong left the count at 0. A scan of another group that failed one time then got no try, and its panel kept all states with no line in the log.
+- **The count is of failed scans in a row.** Each scan of the group counts, also a scan that a new panel or a change starts. A try comes about 10 seconds after each failed scan, and a scan that works starts the count again.
+- **The log says when the tries of a group end.** After 7 failed scans in a row, one warning names the group, and it says which events bring the next try.
+
+### A scan that passes its time limit
+
+- **A changed group gets a new scan at once.** 0.3.8 kept the open scan by the group's ID only. After you took a dashboard that hangs out of a group, each page load and each update of the group still waited 30 seconds for the old scan, and then gave all states. The integration now keeps the group's options beside the open scan, and a group with other options starts its own scan.
+- **Nobody waits a second time for the same scan.** In 0.3.8 each later try waited up to 30 seconds for the scan that still ran, up to 6 times. It held the lock for the changes of all groups in that time, so a panel of another group that connected got no states for up to 30 seconds. Now a caller that finds such a scan gets no result at once.
+- **A new scan has its own full time limit.** In 0.3.8 the wait for the old scan and the new scan shared one limit. A new scan that started late in that wait failed with the message `took longer than 30 seconds`, also when its load was normal.
+- **The end of a late scan starts an update of its group.** In 0.3.8 nothing used that end. When a share returned after the last try, each panel of the group that held all states kept them until another event.
+- **A scan is a background task.** 0.3.8 started it as a task that Home Assistant waits for at the end of its start and at its stop. A load that hangs then held both. Home Assistant does not wait for a background task, and it cancels each one at its stop.
+- **The resource scan has the same time limit.** A request for `lovelace/resources` had no limit. A load that hangs left the panel with no answer, and such a panel loads no card. Now the panel gets the full list after 30 seconds.
+
+### YAML dashboards
+
+- **An open panel keeps its entities while a dashboard cannot be loaded.** 0.3.8 moved each open panel of the group to all states at the next update. So one typing error in one YAML file sent each kiosk of the group every state. A scan that failed in another way kept the entities, so the two faults had opposite results. Now both keep the entities. A panel that connects during the fault still gets all states.
+- **A file that is put back after a fault reaches the open panels.** 0.3.8 compared a configuration with the last one that loaded with success. A file that failed and then came back as before counted as no change, when the first load after it was the preview action or a resource request. A panel that got all states during the fault then kept them. The integration now records a failed load, and the next good load of that dashboard counts as a change.
+- **Each load is compared, and not only the load that fired the event.** A page load sends two requests at one time, and each loads the dashboard. When the load that did not find the changed file returned first, 0.3.8 stored the new configuration. The load that found the change then saw no difference, and the change reached no other open panel. Now each load compares its result with the last one, and the first load that sees a new configuration starts the update.
+- **A save still gives each group one scan.** The update event of a save comes from another task, and it starts an update. The scans of that update load the new configuration, which is no second change. So the integration records each such event, and the first load after it starts no second update.
+- **The comparison uses the configuration as text.** The YAML value `.nan` is not equal to itself. With that value in a file that fires its event at each load, 0.3.8 saw a change at each load, and the updates had no end. Two loads of one file give the same text.
+- **A YAML dashboard whose file is gone is a dashboard that cannot be loaded.** Home Assistant raises an `OSError` for such a file after its first load. Before, that error ended the scan with a traceback at each page load.
+
+### Other paths
+
+- **A resource request that waits at a reload gets the reduced list.** 0.3.8 gave such a request the full list. Now the request goes to the handler that is registered at that time, as a state subscription does. After a reload, that is the new setup's handler.
+- **A registry change starts no scan for a group that cannot be narrowed by design.** Such a group has a strategy, a card that finds its own entities, or a dashboard with no stored configuration, and no registry change alters that. 0.3.8 scanned the group again at each burst of registry events, which come each 10 seconds while Home Assistant starts. The integration now remembers such a group until a dashboard or a group changes.
+- **One update scans a group one time.** Before, a group with a narrowed panel and a panel on all states got two scans in one update.
+- **An update for one group leaves the other groups alone.** Before, the search for panels with all states ran a scan for each group.
+- **A word that ends in `type` is no key.** 0.3.8 read `prototype: custom:x` and `subtype=custom:x` in a text as a card type. The pattern now asks for a boundary before `type`.
+- **A card type with a dot inside a longer string is read whole.** Before, `custom:my.dotted-card` in a template gave the type `my`.
+- **A warning belongs to one subject and holds its last value.** In 0.3.8 each reason had a key of its own, and only a good scan cleared the keys. An error in line 5, then in line 9, then in line 5 again gave two warnings and not three. Now the log gets a warning when the value for a subject changes. The warnings for a card type with no resource were never cleared before, and they now follow the same rule.
+- **A reload forgets the warnings of the scan.** Before, `Dashboard X not found` came one time for each run of Home Assistant.
+
+### Tests
+
+- **The tests leave no state behind.** One test passed only at its first run in a process, because a warning record of the scan stayed from an earlier test. Each test class now clears the scan's records and its change listeners at its start. The suite passes two times in one process, in reverse order and in two shuffled orders.
+- **The stand-in for a YAML dashboard has the cache rules of Home Assistant.** It keeps its cache when a load fails, and it fires its event when a cache existed before the read. The stand-in of 0.3.8 fired no event after a corrected error, so no test saw a file that returns to its old text.
+- **The test for the end of the tries asks for the exact count.** In 0.3.8 it asked for an upper limit only, so it passed also when no try ran.
+- **New tests cover the paths that the review named.**
+  - The later tries: two groups, a group that changes during the scan of its old dashboards, and a late scan that ends in an error.
+  - A YAML dashboard: a file that returns to its old text, two loads at one time, and a file with `.nan`.
+  - A scan of two YAML dashboards of which one changed.
+  - Each case of a YAML dashboard again for the default dashboard.
+  - A stored dashboard: a save, a delete, and a page that connects after a save. Each test counts the scans.
+  - A page that goes to another integration's handler at the unload.
+  - A resource request at a reload, and a resource scan over the time limit.
+  - A registry change for a group with a strategy, and a reason that comes back.
+- A check on a scratch copy made six changes to the code, one at a time. Each change breaks the subject of one new test. That test failed with its change, and it passes with the code as it is.
+- The suite has 260 tests. 0.3.8 had 229.
+
+### Type checks and the workflow
+
+- **`mypy` gives the same result on each machine.** With the settings of 0.3.8, mypy read the real types on a machine that holds Home Assistant. A `type: ignore` in the config flow was then unused, which the strict mode reports. `mypy.ini` now skips each import from Home Assistant, and it names Python 3.14, on which Home Assistant 2026.11 runs.
+- **A second type check reads the types of Home Assistant.** With no such types, mypy checks no call of a function under `@callback`, and it knows the type of 77.54% of the expressions. `mypy-homeassistant.ini` runs the full strict mode, and mypy reads the types from a clone of the core source that `MYPYPATH` names. Nothing of that source runs. mypy then knows the type of 89.57% of the expressions. The Validate workflow runs both checks, and the README gives both commands.
+- **The first run of the full check gave 3 findings, and none was a fault at run time.** The YAML resource collection of Home Assistant has no load function. The call was never reached for it, and the code now asks for the function by name. The `type: ignore` in the config flow was unused, and it is gone. The list in the preview action's answer had a type that did not fit the answer type of an action.
+- **Both jobs install the same voluptuous version.** The job `tests` installed the newest version, and the job `lint` installed 0.16.0.
+- The import in `tests/support.py` that keeps a ruff finding on purpose now has its reason on the line before it, as `ruff.toml` asks.
+
+### Texts
+
+- **The entry for 0.3.8 said four things that did not hold, and it is corrected.** The later tries were not always 6. One thread for a scan that hangs held only for the entity scan of one group. A warning did not come again when another reason came between. The format run changed the text of one comment: a comment in `resolver.py` that moved to its own line got a capital letter and a full stop.
+- The README said `Two changes do not reach an open panel by themselves` and then named three. It now names three.
+- The README says what a new panel and an open panel get for a dashboard that cannot be loaded, and for a scan that passes 30 seconds.
+- The comments and the log messages that the review named are written anew with the code that they describe. The function that asks whether a load is the scan's own load now only answers. In 0.3.8 it also wrote a mark, which its name did not say.
+
+### Limits that stay
+
+- A load that never ends keeps its group's new panels on all states. That lasts until the load ends, the group changes, or Home Assistant restarts. Each open panel keeps its entities in that time.
+- Each request for `lovelace/resources` and each call of the preview action starts a load of its own. While a load hangs, each of them holds one thread of the executor until the load ends.
+- One lock serves the changes of all groups. So a slow scan of one group delays the first states of a new panel of another group, for up to 30 seconds.
+- When the narrowed subscription fails after Home Assistant's handler sent its result, the panel gets a second result for the same message.
+- A text in a dashboard that holds `type: custom:name`, or a quoted `'custom:name'`, names a card also when the text is a sentence for a person. The integration then sends one resource more, and never one less.
+- A card type with a capital letter inside a longer string is not read. The name of a custom element holds no capital letter.
+- The portable check `mypy` reads no type of Home Assistant. The full check needs a clone of the core source, and a library that the clone imports and that the environment lacks keeps the type `Any`.
+
 ## 0.3.8 - 2026-11-24
 
 A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 findings. None is critical. This version corrects each finding that holds. One finding did not hold, and the end of this entry names it. The review confirmed that 0.3.7 changed words only.
@@ -16,10 +98,10 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 ### Panels that kept all states
 
 - **A dashboard that cannot be loaded stops the narrowing, and the log gives the real reason.** 0.3.6 left such a dashboard out of the entity scan, so the group stayed narrowed without its entities. When the file was correct again, no event came, and a panel that opened the dashboard had no state on it. Now the group gets all states, the log gives the error of the load, and the integration tries again. The resource list still leaves such a dashboard out.
-- **The integration tries a failed scan again.** A panel that got all states after a scan error, a time limit or a load error kept them until another event. Now the integration tries the scan again 6 times, with 10 seconds between the tries. When a try works, each open panel of the group is narrowed. When the scan for a new panel works after such a fault, the other panels of its group are narrowed also.
+- **The integration tries a failed scan again.** A panel that got all states after a scan error, a time limit or a load error kept them until another event. Now the integration tries the scan again, at most 6 times, with 10 seconds between the tries. One count served all groups, so a group could get fewer tries, which 0.3.9 corrects. When a try works, each open panel of the group is narrowed. When the scan for a new panel works after such a fault, the other panels of its group are narrowed also.
 - **A registry change narrows a panel that holds all states.** Before, a registry change started no update while no panel was narrowed.
 - **A page whose scan is open at a reload is narrowed by the new setup.** 0.3.6 gave such a page to the handler that the old setup held. The page got all states, and the new setup did not know it. Now the page goes to the handler that is registered at that time.
-- **A scan that hangs holds one thread.** While the scan of a group still runs after its time limit, the next scan of that group waits for its end. It starts no second load.
+- **The entity scan of one group that hangs holds one thread.** While the entity scan of a group still runs after its time limit, the next entity scan of that group waits for its end. It starts no second load. A resource request and the preview action each start a load of their own.
 - **A page that left during its wait gets no scan.** The task read the page's state only after its scan. A task that got its turn after an unload also ran a full scan and then dropped the result. Both checks now come before the scan.
 - **A resource request that waits at an unload gets the full list.** The handler read the unload flag only before its scan.
 
@@ -28,7 +110,7 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 - **A strategy section in a sidebar, or inside another section, stops the narrowing.** The frontend makes a section for each item in `sidebar.sections` of a view, and for each item in `sections` of a section. 0.3.6 read the key `strategy` only in the sections of a view.
 - **A quoted `custom:` type inside a longer string names a card again.** 0.3.6 took such a type only after the word `type`. A template that returns `'custom:name'` by itself named no card, and neither did YAML text with no quotes. The resource of such a card was not sent.
 - **The last two of three joined pieces are no name for the guess.** The text `"my-" + "fancy-" + "thing"` gave the guess the name `fancy-thing`, which the file does not hold.
-- **A warning comes again when its cause comes back.** The warning for a dashboard that cannot be loaded had a key with the dashboard's name only. So a later error of the same dashboard gave no warning. The key now holds the error text, and a good load clears it. The reasons why a group is not narrowed or not reduced are cleared in the same way.
+- **A warning comes again when its cause comes back after a good load.** The warning for a dashboard that cannot be loaded had a key with the dashboard's name only. So a later error of the same dashboard gave no warning. The key now holds the error text, and a good load clears it. The reasons why a group is not narrowed or not reduced are cleared in the same way.
 
 ### Tests and static checks
 
@@ -37,8 +119,8 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 - **Three stand-ins now behave as Home Assistant does.** The select field refuses a value that is no list. The administrator check raises `UnknownUser` for a user that does not exist, which is an `Unauthorized` error in Home Assistant. A closed connection records each send apart, because Home Assistant drops such a send.
 - `tests/test_resolver.py` failed when it ran by itself, because its own stand-ins lacked one name. It now uses the shared stand-ins.
 - **The repository has static checks.** `ruff.toml` sets up ruff with its default rule set, and the Validate workflow has a new job `lint` that runs `ruff check .` with ruff 0.17.5. The first run found no fault in behaviour. It found import blocks out of order, five broad `except` lines that are there on purpose and now say so, and some small points of style. All are corrected, and the import order of the tests now equals that of the integration.
-- **The code has the format of `ruff format`**, which the development checklist of Home Assistant asks for. The run changed line breaks in 16 of the 18 Python files. The syntax tree and each comment of each file are the same before and after it. The job `lint` checks the format also.
-- **The integration has type checks.** `mypy.ini` sets up mypy 2.4.1 in its strict mode for the integration, and the job `lint` runs it. The checks run with no Home Assistant installation, so each name from Home Assistant has the type `Any`, and three strict checks that cannot pass with such names are off. The first run gave 18 findings. 15 came from those names. Two showed that mypy took a second read of the unload flag after a wait for dead code, so the code now reads the flag through a function. One was a variable with a type that was too wide in the resource scan. No finding was a fault in behaviour.
+- **The code has the format of `ruff format`**, which the development checklist of Home Assistant asks for. The run changed line breaks in 16 of the 18 Python files. The syntax tree of each file is the same before and after it. So is each comment, with one exception: a comment in `resolver.py` that moved to its own line got a capital letter and a full stop. The job `lint` checks the format also.
+- **The integration has type checks.** `mypy.ini` sets up mypy 2.4.1 in its strict mode for the integration, and the job `lint` runs it. The checks run with no Home Assistant installation, so each name from Home Assistant has the type `Any`, and three strict checks that cannot pass with such names are off. The first run gave 18 findings. 15 came from those names. In two places, mypy held the unload flag for False after the first test, and so took the second test, which comes after a wait, for dead code. The code now reads the flag through a function. One was a variable with a type that was too wide in the resource scan. No finding was a fault in behaviour.
 
 ### Texts
 

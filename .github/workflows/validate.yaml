@@ -24,9 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The unit tests run against stand-ins for Home Assistant. They need Python 3.12 or
-      # later and the package voluptuous.
+      # later and the package voluptuous, in the version that the job "lint" uses.
       - run: python3 -m venv .venv
-      - run: .venv/bin/python -m pip install voluptuous
+      - run: .venv/bin/python -m pip install voluptuous==0.16.0
       - run: .venv/bin/python -m unittest discover -s tests
   lint:
     runs-on: ubuntu-latest
@@ -39,7 +39,12 @@ jobs:
       - run: .venv/bin/python -m ruff check .
       # The code has the format of the same ruff version.
       - run: .venv/bin/python -m ruff format --check .
-      # The type checks of mypy.ini. The integration imports voluptuous, so mypy reads its
-      # types. Home Assistant is not installed, as mypy.ini says.
+      # The type checks of mypy.ini, which read no Home Assistant. The integration imports
+      # voluptuous, so mypy reads its types.
       - run: .venv/bin/python -m pip install mypy==2.4.1 voluptuous==0.16.0
       - run: .venv/bin/python -m mypy
+      # The full type checks of mypy-homeassistant.ini. mypy reads the types of Home
+      # Assistant from the source of its core at the tag below. Nothing of that source
+      # runs, and no package of Home Assistant is installed.
+      - run: git clone --depth 1 --branch 2026.11.2 https://github.com/home-assistant/core ../home-assistant-core
+      - run: MYPYPATH=../home-assistant-core .venv/bin/python -m mypy --config-file mypy-homeassistant.ini
