@@ -37,3 +37,5 @@ jobs:
       - run: python3 -m venv .venv
       - run: .venv/bin/python -m pip install ruff==0.17.5
       - run: .venv/bin/python -m ruff check .
+      # The code has the format of the same ruff version.
+      - run: .venv/bin/python -m ruff format --check .

@@ -491,9 +491,7 @@ class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
                         "cards": [
                             {
                                 "type": "custom:stack-in-card",
-                                "cards": [
-                                    {"type": "custom:mushroom-entity-card"}
-                                ],
+                                "cards": [{"type": "custom:mushroom-entity-card"}],
                             }
                         ]
                     }
@@ -506,7 +504,9 @@ class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
             summary["included"],
         )
         self.assertIn("/hacsfiles/lovelace-mushroom/mushroom.js", summary["included"])
-        self.assertNotIn("/hacsfiles/button-card/button-card.js?v=9", summary["included"])
+        self.assertNotIn(
+            "/hacsfiles/button-card/button-card.js?v=9", summary["included"]
+        )
 
     async def test_camera_live_provider_keeps_the_webrtc_script(self) -> None:
         """live_provider webrtc-card needs the WebRTC integration's element.
@@ -514,7 +514,9 @@ class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
         Advanced Camera Card makes a <webrtc-camera> element for that live provider and
         waits until the element is defined. No "custom:" type in the dashboard names it.
         """
-        self.resources.append({"url": "/webrtc/webrtc-camera.js?v=v3.6.1", "type": "module"})
+        self.resources.append(
+            {"url": "/webrtc/webrtc-camera.js?v=v3.6.1", "type": "module"}
+        )
         self.dashboards["cameras"] = _Dashboard(
             {
                 "views": [

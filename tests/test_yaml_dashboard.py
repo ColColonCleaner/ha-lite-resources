@@ -152,7 +152,9 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
     async def test_change_that_a_resources_request_loads_first(self) -> None:
         self.dashboard.write(_cards("sensor.old", "sensor.new"))
         handler, _schema = self.hass.data["websocket_api"]["lovelace/resources"]
-        await handler(self.hass, _Connection("u-w2"), {"id": 1, "type": "lovelace/resources"})
+        await handler(
+            self.hass, _Connection("u-w2"), {"id": 1, "type": "lovelace/resources"}
+        )
         await self.hass.drain()
         self._assert_each_open_page_has_the_new_entity()
 
@@ -172,7 +174,9 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
         await self.hass.drain()
         self._assert_each_open_page_has_the_new_entity()
 
-    async def test_file_that_fires_at_each_load_starts_no_update_with_no_end(self) -> None:
+    async def test_file_that_fires_at_each_load_starts_no_update_with_no_end(
+        self,
+    ) -> None:
         self.dashboard.always = True
         await self._open("u-w2", 9)
         loads = self.dashboard.loads
@@ -192,15 +196,19 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
         self.dashboard.error = error
         with self.assertRaises(_resolver.CannotNarrow) as raised:
             await _resolver._async_dashboard_scans(self.hass, ["yaml-dash"])
-        self.assertEqual(str(raised.exception), "the dashboard yaml-dash cannot be loaded: bad YAML")
+        self.assertEqual(
+            str(raised.exception), "the dashboard yaml-dash cannot be loaded: bad YAML"
+        )
         # This task loaded the dashboard a moment ago. Its load is over.
         self.assertFalse(_resolver.own_load_fired("yaml-dash"))
 
-    async def test_dashboard_that_cannot_be_loaded_gives_all_states_and_a_later_try(self) -> None:
+    async def test_dashboard_that_cannot_be_loaded_gives_all_states_and_a_later_try(
+        self,
+    ) -> None:
         _entry.REGISTRY_REFRESH_DELAY = 0.05
-        self.dashboard.error = sys.modules["homeassistant.exceptions"].HomeAssistantError(
-            "bad YAML"
-        )
+        self.dashboard.error = sys.modules[
+            "homeassistant.exceptions"
+        ].HomeAssistantError("bad YAML")
         with self.assertLogs(_entry._LOGGER, level="WARNING") as logs:
             await self._open("u-w2", 9)
         self.assertIn("cannot be loaded: bad YAML", logs.records[0].getMessage())
@@ -213,9 +221,9 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_tries_stop_when_the_dashboard_stays_broken(self) -> None:
         _entry.REGISTRY_REFRESH_DELAY = 0
-        self.dashboard.error = sys.modules["homeassistant.exceptions"].HomeAssistantError(
-            "bad YAML"
-        )
+        self.dashboard.error = sys.modules[
+            "homeassistant.exceptions"
+        ].HomeAssistantError("bad YAML")
         loads = self.dashboard.loads
         with self.assertLogs(_entry._LOGGER, level="WARNING"):
             await self._open("u-w2", 9)

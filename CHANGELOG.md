@@ -37,6 +37,7 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 - **Three stand-ins now behave as Home Assistant does.** The select field refuses a value that is no list. The administrator check raises `UnknownUser` for a user that does not exist, which is an `Unauthorized` error in Home Assistant. A closed connection records each send apart, because Home Assistant drops such a send.
 - `tests/test_resolver.py` failed when it ran by itself, because its own stand-ins lacked one name. It now uses the shared stand-ins.
 - **The repository has static checks.** `ruff.toml` sets up ruff with its default rule set, and the Validate workflow has a new job `lint` that runs `ruff check .` with ruff 0.17.5. The first run found no fault in behaviour. It found import blocks out of order, five broad `except` lines that are there on purpose and now say so, and some small points of style. All are corrected, and the import order of the tests now equals that of the integration.
+- **The code has the format of `ruff format`**, which the development checklist of Home Assistant asks for. The run changed line breaks in 16 of the 18 Python files. The syntax tree and each comment of each file are the same before and after it. The job `lint` checks the format also.
 
 ### Texts
 

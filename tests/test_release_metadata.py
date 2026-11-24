@@ -67,7 +67,9 @@ class ReleaseMetadataTest(unittest.TestCase):
         """Release steps tell a maintainer to publish after Validate succeeds."""
         readme = (ROOT / "README.md").read_text()
         self.assertIn("## Releasing", readme)
-        self.assertIn("after the Validate workflow on that commit has succeeded", readme)
+        self.assertIn(
+            "after the Validate workflow on that commit has succeeded", readme
+        )
         self.assertIn("42369085242", readme)
 
     def test_single_integration_package(self) -> None:

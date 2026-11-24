@@ -286,7 +286,9 @@ class LiveSubscriptions:
         """Return the live subscriptions, as a list that stays valid during changes."""
         return list(self._live.values())
 
-    def start(self, connection: Any, msg: dict[str, Any], entities: Iterable[str]) -> None:
+    def start(
+        self, connection: Any, msg: dict[str, Any], entities: Iterable[str]
+    ) -> None:
         """Make a page's subscription for these entities, and keep track of it."""
         wanted = frozenset(entities)
         self._subscribe(connection, {**msg, "entity_ids": sorted(wanted)})

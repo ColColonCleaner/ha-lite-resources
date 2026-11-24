@@ -73,7 +73,9 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             "other-kit/other-kit.js",
             b'const t=t=>e=>customElements.define(t,e);const names=["grid-layout"];',
         )
-        self.resources.append({"url": "/hacsfiles/other-kit/other-kit.js", "type": "module"})
+        self.resources.append(
+            {"url": "/hacsfiles/other-kit/other-kit.js", "type": "module"}
+        )
         summary = await self._resolve({"type": "custom:grid-layout"})
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
         self.assertIn("/hacsfiles/other-kit/other-kit.js", summary["included"])
@@ -85,13 +87,17 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             "editor-kit/editor-kit.js",
             b'customElements.define("editor-kit", class {});const stub={layout_type:"grid-layout"};',
         )
-        self.resources.append({"url": "/hacsfiles/editor-kit/editor-kit.js", "type": "module"})
+        self.resources.append(
+            {"url": "/hacsfiles/editor-kit/editor-kit.js", "type": "module"}
+        )
         summary = await self._resolve({"type": "custom:grid-layout"})
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
         self.assertIn("/hacsfiles/editor-kit/editor-kit.js", summary["excluded"])
         self.assertEqual(summary["guessed_types"], ["grid-layout"])
 
-    async def test_name_of_two_pieces_in_a_helper_call_is_found_by_the_guess(self) -> None:
+    async def test_name_of_two_pieces_in_a_helper_call_is_found_by_the_guess(
+        self,
+    ) -> None:
         _write(
             self.root,
             "pieces/pieces.js",
@@ -134,7 +140,10 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         )
         _write(self.root, "custom-brand-icons/custom-brand-icons.js", ICONS_JS)
         self.resources.append(
-            {"url": "/hacsfiles/custom-brand-icons/custom-brand-icons.js", "type": "module"}
+            {
+                "url": "/hacsfiles/custom-brand-icons/custom-brand-icons.js",
+                "type": "module",
+            }
         )
         summary = await self._resolve({"type": "tile", "entity": "light.hall"})
         # Each readable file in which the scan sees no element is listed, whatever its
@@ -167,7 +176,9 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             '{{ "custom:layout-card" if is_state("sun.sun", "above_horizon") }}',
             "type: custom:layout-card\nentity: light.x",
         ):
-            summary = await self._resolve({"type": "custom:config-template-card", "card": text})
+            summary = await self._resolve(
+                {"type": "custom:config-template-card", "card": text}
+            )
             self.assertIn("layout-card", summary["needed_types"], text)
 
     async def test_three_pieces_give_the_guess_no_name(self) -> None:
@@ -183,7 +194,9 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["guessed_types"], [])
         self.assertEqual(summary["unresolved_types"], ["fancy-thing"])
 
-    async def test_dashboard_that_cannot_be_loaded_is_left_out_of_the_resources(self) -> None:
+    async def test_dashboard_that_cannot_be_loaded_is_left_out_of_the_resources(
+        self,
+    ) -> None:
         # The browser shows no card of such a dashboard, so the list needs none of its
         # resources. The log names the dashboard one time for each error text.
         broken = _Dashboard(None, fail=True)
@@ -191,7 +204,9 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         hass = _Hass(self.root, dashboards, self.resources)
         options = {"dashboards": ["d", "yaml"], "include_unscannable": False}
         with self.assertLogs(_resolver._LOGGER, level="WARNING") as logs:
-            summary = (await _resolver.async_resolve(hass, options, FileCache())).as_dict()
+            summary = (
+                await _resolver.async_resolve(hass, options, FileCache())
+            ).as_dict()
             await _resolver.async_resolve(hass, options, FileCache())
         self.assertIn("/hacsfiles/layout-card/layout-card.js", summary["included"])
         self.assertEqual(len(logs.records), 1)
@@ -225,15 +240,22 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             {"url": "https://cdn-two.example/dist/a-card.js", "type": "module"},
         ]
         summary = await self._resolve(
-            {"type": "tile"}, always_include=["https://cdn-one.example/dist/a-card.js?v=2"]
+            {"type": "tile"},
+            always_include=["https://cdn-one.example/dist/a-card.js?v=2"],
         )
-        self.assertEqual(summary["included"], ["https://cdn-one.example/dist/a-card.js"])
-        self.assertEqual(summary["excluded"], ["https://cdn-two.example/dist/a-card.js"])
+        self.assertEqual(
+            summary["included"], ["https://cdn-one.example/dist/a-card.js"]
+        )
+        self.assertEqual(
+            summary["excluded"], ["https://cdn-two.example/dist/a-card.js"]
+        )
 
     async def test_no_dashboard_of_the_group_exists(self) -> None:
         hass = _Hass(self.root, {}, self.resources)
         with self.assertRaises(_resolver.CannotNarrow):
-            await _resolver.async_resolve(hass, {"dashboards": ["deleted"]}, FileCache())
+            await _resolver.async_resolve(
+                hass, {"dashboards": ["deleted"]}, FileCache()
+            )
 
 
 class FileReadTest(unittest.TestCase):
@@ -255,7 +277,9 @@ class FileReadTest(unittest.TestCase):
     def test_cut_gz_copy_is_unreadable(self) -> None:
         path = self.root / "a-card.js"
         with gzip.open(str(path) + ".gz", "wb") as fh:
-            fh.write(b'customElements.define("a-card", class extends HTMLElement {});' * 50)
+            fh.write(
+                b'customElements.define("a-card", class extends HTMLElement {});' * 50
+            )
         data = Path(str(path) + ".gz").read_bytes()
         Path(str(path) + ".gz").write_bytes(data[: len(data) // 2])
         self.assertIsNone(FileCache().names(str(path)))
@@ -277,10 +301,16 @@ class UrlToPathTest(unittest.TestCase):
         self.hass = _Hass("/config", {}, [])
 
     def test_url_of_another_host_is_no_local_file(self) -> None:
-        self.assertIsNone(_resolver.url_to_path(self.hass, "https://cdn.example/local/card.js"))
+        self.assertIsNone(
+            _resolver.url_to_path(self.hass, "https://cdn.example/local/card.js")
+        )
 
     def test_path_that_leaves_the_folder_is_refused(self) -> None:
-        for url in ("/local/../secrets.yaml", "/local/%2e%2e/secrets.yaml", "/other/card.js"):
+        for url in (
+            "/local/../secrets.yaml",
+            "/local/%2e%2e/secrets.yaml",
+            "/other/card.js",
+        ):
             self.assertIsNone(_resolver.url_to_path(self.hass, url))
 
     def test_local_file_maps_into_the_www_folder(self) -> None:
@@ -310,7 +340,8 @@ class NamesTest(unittest.TestCase):
         var legacy = "my" + "-legacy-card";
         """
         self.assertEqual(
-            names_in_javascript(data, "bundle"), frozenset({"my-card", "my-legacy-card"})
+            names_in_javascript(data, "bundle"),
+            frozenset({"my-card", "my-legacy-card"}),
         )
 
 

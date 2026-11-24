@@ -61,7 +61,9 @@ def _with_stored(
     value among the options, the group's form cannot be saved.
     """
     known = {option["value"] for option in options}
-    gone = [value for value in stored or [] if isinstance(value, str) and value not in known]
+    gone = [
+        value for value in stored or [] if isinstance(value, str) and value not in known
+    ]
     return options + [
         SelectOptionDict(value=value, label=label.format(value)) for value in gone
     ]
@@ -77,7 +79,9 @@ async def _async_group_schema(
     """
     all_users = [u for u in await hass.auth.async_get_users() if not u.system_generated]
     users = [
-        SelectOptionDict(value=u.id, label=u.name or u.id) for u in all_users if u.is_active
+        SelectOptionDict(value=u.id, label=u.name or u.id)
+        for u in all_users
+        if u.is_active
     ]
     # A stored user that is not active any more exists, so the form shows its name.
     not_active = {u.id: u.name or u.id for u in all_users if not u.is_active}
@@ -95,7 +99,9 @@ async def _async_group_schema(
             )
             continue
         title = (getattr(dashboard, "config", None) or {}).get("title") or url_path
-        dashboards.append(SelectOptionDict(value=url_path, label=f"{title} ({url_path})"))
+        dashboards.append(
+            SelectOptionDict(value=url_path, label=f"{title} ({url_path})")
+        )
     dashboards = _with_stored(
         dashboards, current.get(CONF_DASHBOARDS), "{} (dashboard not found)"
     )
@@ -113,7 +119,9 @@ async def _async_group_schema(
     return vol.Schema(
         {
             vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): TextSelector(),
-            vol.Required(CONF_USERS, default=current.get(CONF_USERS, [])): _multi(users),
+            vol.Required(CONF_USERS, default=current.get(CONF_USERS, [])): _multi(
+                users
+            ),
             vol.Required(
                 CONF_DASHBOARDS, default=current.get(CONF_DASHBOARDS, [])
             ): _multi(dashboards),
@@ -163,7 +171,9 @@ class LiteResourcesConfigFlow(ConfigFlow, domain=DOMAIN):
 class GroupSubentryFlow(ConfigSubentryFlow):
     """Add or change one group of lite users."""
 
-    def _errors(self, user_input: dict[str, Any], group_id: str | None) -> dict[str, str]:
+    def _errors(
+        self, user_input: dict[str, Any], group_id: str | None
+    ) -> dict[str, str]:
         """Return the form errors for this input.
 
         `group_id` is the ID of the group, and None for a new group.

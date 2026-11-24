@@ -224,9 +224,10 @@ Before a pull request, run the tests and the static checks from the root of the 
 ```bash
 python -m unittest discover -s tests
 ruff check .
+ruff format --check .
 ```
 
-The tests need Python 3.12 or later and the package `voluptuous`. They run against stand-ins, so they need no Home Assistant installation. The static checks need ruff 0.17.5, which is the version that the Validate workflow installs. `ruff.toml` holds their settings.
+The tests need Python 3.12 or later and the package `voluptuous`. They run against stand-ins, so they need no Home Assistant installation. The static checks and the format check need ruff 0.17.5, which is the version that the Validate workflow installs. `ruff.toml` holds their settings. To give changed code the format, run `ruff format .`.
 
 ## Releasing
 

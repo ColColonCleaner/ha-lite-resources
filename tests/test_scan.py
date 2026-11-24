@@ -57,14 +57,18 @@ class _Dashboard:
 def _hass(dashboards: dict) -> SimpleNamespace:
     states = {
         entity_id: SimpleNamespace(
-            entity_id=entity_id, domain=entity_id.partition(".")[0], attributes=attributes
+            entity_id=entity_id,
+            domain=entity_id.partition(".")[0],
+            attributes=attributes,
         )
         for entity_id, attributes in STATES.items()
     }
     return SimpleNamespace(
         data={
             "lovelace": SimpleNamespace(
-                dashboards={key: _Dashboard(config) for key, config in dashboards.items()}
+                dashboards={
+                    key: _Dashboard(config) for key, config in dashboards.items()
+                }
             )
         },
         states=SimpleNamespace(async_all=lambda: list(states.values()), get=states.get),
@@ -72,7 +76,9 @@ def _hass(dashboards: dict) -> SimpleNamespace:
         device_registry=SimpleNamespace(async_get={}.get),
         area_registry=SimpleNamespace(async_get_area=lambda area_id: None),
         services=SimpleNamespace(
-            has_service=lambda domain, service: (domain, service) == ("light", "turn_on")
+            has_service=lambda domain, service: (
+                (domain, service) == ("light", "turn_on")
+            )
         ),
     )
 
@@ -112,7 +118,9 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_one_dashboard_of_two_with_no_stored_configuration(self) -> None:
         plain = _cards({"type": "tile", "entity": "light.hall"})
-        self.assertIn("generated", await self._reason({"plain": plain, "generated": None}))
+        self.assertIn(
+            "generated", await self._reason({"plain": plain, "generated": None})
+        )
 
     async def test_no_dashboard_of_the_group_exists(self) -> None:
         self.assertIn("exists", await self._reason({}, keys=["deleted"]))
@@ -123,7 +131,12 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("light.hall", found)
 
     async def test_cards_that_find_their_entities_by_themselves(self) -> None:
-        for card_type in ("home-summary", "power-sankey", "energy-usage-graph", "water-sankey"):
+        for card_type in (
+            "home-summary",
+            "power-sankey",
+            "energy-usage-graph",
+            "water-sankey",
+        ):
             reason = await self._reason({"d": _cards({"type": card_type})})
             self.assertIn(card_type, reason)
 
@@ -132,10 +145,16 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         card = {
             "type": "tile",
             "entity": "light.hall",
-            "features": [{"type": "water-heater-operation-modes"}, {"type": "power-total"}],
+            "features": [
+                {"type": "water-heater-operation-modes"},
+                {"type": "power-total"},
+            ],
         }
         self.assertIn("light.hall", await _entities({"d": _cards(card)}))
-        custom = {"type": "custom:chart-card", "series": [{"type": "power-flow", "entity": "light.hall"}]}
+        custom = {
+            "type": "custom:chart-card",
+            "series": [{"type": "power-flow", "entity": "light.hall"}],
+        }
         self.assertIn("light.hall", await _entities({"d": _cards(custom)}))
 
     async def test_key_strategy_in_a_card_or_an_action_is_no_strategy(self) -> None:
@@ -145,7 +164,11 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
             "entity": "light.hall",
             "tap_action": {"action": "perform-action", "data": {"strategy": "eco"}},
         }
-        custom = {"type": "custom:charger-card", "entity": "light.second", "strategy": "solar"}
+        custom = {
+            "type": "custom:charger-card",
+            "entity": "light.second",
+            "strategy": "solar",
+        }
         found = await _entities({"d": _cards(button, custom)})
         self.assertLessEqual({"light.hall", "light.second"}, found)
 
@@ -155,7 +178,9 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         plain = _cards({"type": "tile", "entity": "light.hall"})
         with self.assertRaises(CannotNarrow) as raised:
             await _entities({"plain": plain, "yaml": "broken"})
-        self.assertIn("the dashboard yaml cannot be loaded: bad YAML", str(raised.exception))
+        self.assertIn(
+            "the dashboard yaml cannot be loaded: bad YAML", str(raised.exception)
+        )
         self.assertTrue(raised.exception.retry)
         with self.assertRaises(CannotNarrow) as raised:
             await _entities({"yaml": "broken"})
@@ -173,8 +198,14 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_strategy_section_in_a_sidebar_and_inside_a_section(self) -> None:
         # The frontend makes a section element for each item of these two lists also.
-        sidebar = {"views": [{"sidebar": {"sections": [{"strategy": {"type": "common-controls"}}]}}]}
-        nested = {"views": [{"sections": [{"sections": [{"sections": [{"strategy": {}}]}]}]}]}
+        sidebar = {
+            "views": [
+                {"sidebar": {"sections": [{"strategy": {"type": "common-controls"}}]}}
+            ]
+        }
+        nested = {
+            "views": [{"sections": [{"sections": [{"sections": [{"strategy": {}}]}]}]}]
+        }
         self.assertIn("strategy", await self._reason({"d": sidebar}))
         self.assertIn("strategy", await self._reason({"d": nested}))
 
@@ -186,7 +217,9 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         view = {"views": [{"strategy": {"type": "area", "area": "kitchen"}}]}
         self.assertEqual(_discovery.area_cards(view), [])
 
-    async def test_default_dashboard_is_the_lovelace_dashboard_when_it_exists(self) -> None:
+    async def test_default_dashboard_is_the_lovelace_dashboard_when_it_exists(
+        self,
+    ) -> None:
         # Home Assistant's lovelace commands take "lovelace" before the key None.
         dashboards = {
             "lovelace": _cards({"type": "tile", "entity": "light.hall"}),
@@ -195,7 +228,9 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
         found = await _entities(dashboards, keys=["__default__"])
         self.assertIn("light.hall", found)
 
-    async def test_default_dashboard_is_the_key_none_with_no_lovelace_dashboard(self) -> None:
+    async def test_default_dashboard_is_the_key_none_with_no_lovelace_dashboard(
+        self,
+    ) -> None:
         dashboards = {None: _cards({"type": "tile", "entity": "light.second"})}
         self.assertIn("light.second", await _entities(dashboards, keys=["__default__"]))
 
@@ -204,18 +239,30 @@ class EntityScanTest(unittest.IsolatedAsyncioTestCase):
     """The entities that a stored dashboard's scan finds."""
 
     async def test_entity_after_a_line_break_or_a_tab_in_a_string(self) -> None:
-        card = {"type": "custom:list-card", "entities": "light.hall\nlight.second\tlight.third"}
+        card = {
+            "type": "custom:list-card",
+            "entities": "light.hall\nlight.second\tlight.third",
+        }
         template = {"type": "markdown", "content": "Value:\nsensor.bare is on"}
         found = await _entities({"d": _cards(card, template)})
-        self.assertLessEqual({"light.hall", "light.second", "light.third", "sensor.bare"}, found)
+        self.assertLessEqual(
+            {"light.hall", "light.second", "light.third", "sensor.bare"}, found
+        )
 
     async def test_value_that_json_does_not_know(self) -> None:
         # A YAML dashboard can hold a date with no quotes.
-        card = {"type": "tile", "entity": "light.hall", "since": datetime.date(2026, 1, 1)}
+        card = {
+            "type": "tile",
+            "entity": "light.hall",
+            "since": datetime.date(2026, 1, 1),
+        }
         self.assertIn("light.hall", await _entities({"d": _cards(card)}))
 
     async def test_entity_as_a_key(self) -> None:
-        card = {"type": "custom:state-map", "states": {"light.second": {"icon": "mdi:lamp"}}}
+        card = {
+            "type": "custom:state-map",
+            "states": {"light.second": {"icon": "mdi:lamp"}},
+        }
         self.assertIn("light.second", await _entities({"d": _cards(card)}))
 
     async def test_person_of_each_user_of_the_group(self) -> None:
@@ -244,11 +291,17 @@ class EntityScanTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_map_card_that_shows_all(self) -> None:
         found = await _entities({"d": _cards({"type": "map", "show_all": True})})
-        self.assertLessEqual({"person.anna", "device_tracker.phone", "zone.work"}, found)
+        self.assertLessEqual(
+            {"person.anna", "device_tracker.phone", "zone.work"}, found
+        )
         self.assertNotIn("geo_location.quake_1", found)
 
     async def test_map_card_with_geo_location_sources(self) -> None:
-        card = {"type": "map", "entities": ["person.anna"], "geo_location_sources": ["all"]}
+        card = {
+            "type": "map",
+            "entities": ["person.anna"],
+            "geo_location_sources": ["all"],
+        }
         found = await _entities({"d": _cards(card)})
         self.assertIn("geo_location.quake_1", found)
         self.assertNotIn("device_tracker.phone", found)

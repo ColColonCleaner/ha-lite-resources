@@ -172,14 +172,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await asyncio.wait({scan}, timeout=SCAN_TIMEOUT)
         if scan is None or scan.done():
             scan = hass.async_create_task(
-                async_dashboard_entities(hass, dict(group.options), include_missing=True),
+                async_dashboard_entities(
+                    hass, dict(group.options), include_missing=True
+                ),
                 name=f"{DOMAIN} entity scan",
             )
             open_scans[group.group_id] = scan
             if not scan.done():
-                await asyncio.wait(
-                    {scan}, timeout=max(deadline - hass.loop.time(), 0)
-                )
+                await asyncio.wait({scan}, timeout=max(deadline - hass.loop.time(), 0))
         if not scan.done():
             scan.add_done_callback(_drop_result)
             trouble.add(group.group_id)
@@ -464,7 +464,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             for item in live.items():
                 try:
                     user = item.connection.user
-                    group = group_for_user(current, user.id if user is not None else None)
+                    group = group_for_user(
+                        current, user.id if user is not None else None
+                    )
                     if group is None or not group.filter_states:
                         # The user left its group, or the group no longer narrows the states.
                         live.update(item, None)
@@ -490,7 +492,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             len(entities),
                         )
                 except Exception:  # the other pages still get their update
-                    _LOGGER.exception("The update of an open page of a lite user failed")
+                    _LOGGER.exception(
+                        "The update of an open page of a lite user failed"
+                    )
 
     async def adopt_unfiltered(tried: set[str] | None = None) -> None:
         """Narrow each subscription to all states that a page of a lite user holds.
@@ -519,7 +523,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             for connection, msg_id in found:
                 try:
                     user = connection.user
-                    group = group_for_user(current, user.id if user is not None else None)
+                    group = group_for_user(
+                        current, user.id if user is not None else None
+                    )
                     if group is None or not group.filter_states:
                         continue
                     scanned = await group_sets(sets, failed, group, tried)
@@ -530,7 +536,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     entities = sets[group.group_id]
                     if not entities:
                         continue
-                    if live.adopt(connection, msg_id, readable_entity_ids(user), entities):
+                    if live.adopt(
+                        connection, msg_id, readable_entity_ids(user), entities
+                    ):
                         _LOGGER.debug(
                             "%s (group %s) had a subscription to all states; it now "
                             "gets %d entities",
@@ -539,7 +547,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             len(entities),
                         )
                 except Exception:  # the other pages still get their change
-                    _LOGGER.exception("The narrowing of an open page of a lite user failed")
+                    _LOGGER.exception(
+                        "The narrowing of an open page of a lite user failed"
+                    )
 
     async def update_pages(only: set[str] | None = None) -> None:
         """Bring each open page that belongs to a lite user in step with its group and its dashboards."""
@@ -736,7 +746,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
 
     entry.async_on_unload(restore)
-    entry.async_on_unload(hass.bus.async_listen(EVENT_LOVELACE_UPDATED, dashboard_updated))
+    entry.async_on_unload(
+        hass.bus.async_listen(EVENT_LOVELACE_UPDATED, dashboard_updated)
+    )
     entry.async_on_unload(async_listen_changes(dashboard_changed))
     for event_type in REGISTRY_EVENTS:
         entry.async_on_unload(hass.bus.async_listen(event_type, registry_updated))

@@ -22,7 +22,9 @@ PACKAGE = ROOT / "custom_components" / "lite_resources"
 
 def load(module_name: str, filename: str):
     """Load one integration module without running the package __init__."""
-    package = sys.modules.setdefault("lite_resources", types.ModuleType("lite_resources"))
+    package = sys.modules.setdefault(
+        "lite_resources", types.ModuleType("lite_resources")
+    )
     package.__path__ = [str(PACKAGE)]
     package.__package__ = "lite_resources"
     spec = importlib.util.spec_from_file_location(module_name, PACKAGE / filename)
@@ -79,7 +81,9 @@ def _websocket_command(schema: dict[Any, Any]):
     return decorate
 
 
-def _async_register_command(hass, command_or_handler, handler=None, schema=None) -> None:
+def _async_register_command(
+    hass, command_or_handler, handler=None, schema=None
+) -> None:
     """Stand-in for websocket_api.async_register_command."""
     if handler is None:
         handler = command_or_handler
@@ -192,9 +196,7 @@ def install_homeassistant_stubs() -> None:
 
     lovelace_const = _module("homeassistant.components.lovelace.const")
     _default(lovelace_const, "LOVELACE_DATA", "lovelace")
-    _default(
-        _module("homeassistant.auth.permissions.const"), "POLICY_READ", "read"
-    )
+    _default(_module("homeassistant.auth.permissions.const"), "POLICY_READ", "read")
 
     exceptions = _module("homeassistant.exceptions")
     if not hasattr(exceptions, "HomeAssistantError"):

@@ -457,7 +457,9 @@ async def _async_dashboard_scans(
             _warn_once(("no dashboard", key), "Dashboard %s not found", key)
             continue
         _WARNED.discard(("no dashboard", key))
-        url_path = getattr(dashboard, "url_path", None if key == DEFAULT_DASHBOARD else key)
+        url_path = getattr(
+            dashboard, "url_path", None if key == DEFAULT_DASHBOARD else key
+        )
         load = {"url_path": url_path, "active": True, "fired": False}
         token = _OWN_LOAD.set(load)
         try:
@@ -465,7 +467,8 @@ async def _async_dashboard_scans(
         except ConfigNotFound:  # no stored configuration: the browser makes the cards
             without_config.append(key)
             continue
-        except HomeAssistantError as err:  # such as a YAML dashboard with a syntax error
+        except HomeAssistantError as err:
+            # Such as a YAML dashboard with a syntax error.
             failed[key] = str(err)
             continue
         finally:
@@ -564,7 +567,9 @@ async def async_dashboard_entities(
     entities = registry_entities(hass)
     states = hass.states.async_all()
     # The registry holds an entity's domain before the entity has a state.
-    domains = {state.domain for state in states} | {entity.domain for entity in entities}
+    domains = {state.domain for state in states} | {
+        entity.domain for entity in entities
+    }
     if not domains:
         return set()
     pattern = re.compile(
@@ -658,7 +663,9 @@ async def async_resolve(
     hints: set[str] = set()
     # A dashboard with no stored configuration holds core cards only, so it needs no
     # resource.
-    scans, _without_config, failed = await _async_dashboard_scans(hass, result.dashboards)
+    scans, _without_config, failed = await _async_dashboard_scans(
+        hass, result.dashboards
+    )
     # A dashboard that cannot be loaded shows no card in the browser, so its resources
     # are not counted. The warning comes again when the error text changes.
     for key, error in failed.items():
@@ -704,9 +711,7 @@ async def async_resolve(
         stem = resource_stem(url)
         stem_types = types_for_stem(stem, needed)
         path = url_to_path(hass, url)
-        names = (
-            await hass.async_add_executor_job(cache.names, path) if path else None
-        )
+        names = await hass.async_add_executor_job(cache.names, path) if path else None
         if names is None:
             # Served by an integration, missing, or remote: contents can't be
             # checked. Keep it unless the file name is a card that isn't used.

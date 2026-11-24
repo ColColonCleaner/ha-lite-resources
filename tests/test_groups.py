@@ -22,7 +22,11 @@ LiveSubscriptions = _groups.LiveSubscriptions
 WORKSHOP = Group(
     "g-workshop",
     "Workshop kiosks",
-    {"users": ["u-w1", "u-w2"], "dashboards": ["dashboard-workshop"], "filter_states": True},
+    {
+        "users": ["u-w1", "u-w2"],
+        "dashboards": ["dashboard-workshop"],
+        "filter_states": True,
+    },
 )
 KITCHEN = Group(
     "g-kitchen",
@@ -54,7 +58,9 @@ class GroupLookupTest(unittest.TestCase):
             ),
         }
         groups = _groups.groups_from_subentries(subentries)
-        self.assertEqual([(g.group_id, g.name) for g in groups], [("a", "Workshop kiosks")])
+        self.assertEqual(
+            [(g.group_id, g.name) for g in groups], [("a", "Workshop kiosks")]
+        )
         self.assertEqual(groups[0].users, ["u-w1"])
 
     def test_user_maps_to_its_group(self) -> None:
@@ -67,21 +73,28 @@ class GroupLookupTest(unittest.TestCase):
         self.assertEqual(
             _groups.groups_with_dashboard(GROUPS, "dashboard-workshop"), [WORKSHOP]
         )
-        self.assertEqual(_groups.groups_with_dashboard(GROUPS, "main-dashboard"), [KITCHEN])
+        self.assertEqual(
+            _groups.groups_with_dashboard(GROUPS, "main-dashboard"), [KITCHEN]
+        )
         self.assertEqual(_groups.groups_with_dashboard(GROUPS, "dashboard-dev"), [])
 
     def test_lovelace_dashboard_counts_as_the_default_dashboard(self) -> None:
         # Home Assistant shows the dashboard "lovelace" as the default one when it exists.
         self.assertEqual(_groups.groups_with_dashboard(GROUPS, "lovelace"), [KITCHEN])
-        named = Group("g-named", "Named", {"users": ["u-n"], "dashboards": ["lovelace"]})
+        named = Group(
+            "g-named", "Named", {"users": ["u-n"], "dashboards": ["lovelace"]}
+        )
         self.assertEqual(
-            _groups.groups_with_dashboard([*GROUPS, named], "lovelace"), [KITCHEN, named]
+            _groups.groups_with_dashboard([*GROUPS, named], "lovelace"),
+            [KITCHEN, named],
         )
         self.assertEqual(_groups.groups_with_dashboard([named], None), [])
 
     def test_user_in_two_groups_is_found(self) -> None:
         self.assertEqual(_groups.users_in_two_groups(GROUPS), set())
-        second = Group("g-second", "Second", {"users": ["u-w2", "u-x"], "dashboards": ["d"]})
+        second = Group(
+            "g-second", "Second", {"users": ["u-w2", "u-x"], "dashboards": ["d"]}
+        )
         self.assertEqual(_groups.users_in_two_groups([*GROUPS, second]), {"u-w2"})
 
     def test_group_has_a_hash(self) -> None:
@@ -101,7 +114,8 @@ class GroupLookupTest(unittest.TestCase):
             _groups.users_in_other_groups(GROUPS, "g-workshop", ["u-w1", "u-w2"]), set()
         )
         self.assertEqual(
-            _groups.users_in_other_groups(GROUPS, "g-workshop", ["u-w1", "u-k"]), {"u-k"}
+            _groups.users_in_other_groups(GROUPS, "g-workshop", ["u-w1", "u-k"]),
+            {"u-k"},
         )
 
     def test_single_group_options_become_group_data(self) -> None:
@@ -261,7 +275,9 @@ class LiveSubscriptionsTest(unittest.TestCase):
         item = self.live.items()[0]
         self.assertEqual(item.entities, {"sensor.a", "sensor.b"})
         self.assertIn(5, self.connection.subscriptions)
-        self.assertFalse(any("r" in message["event"] for message in self.connection.messages))
+        self.assertFalse(
+            any("r" in message["event"] for message in self.connection.messages)
+        )
         # The page can still end its subscription, and the table then forgets it.
         self.connection.subscriptions.pop(5)()
         self.assertTrue(self.core.calls[0]["ended"])
@@ -288,7 +304,10 @@ class LiveSubscriptionsTest(unittest.TestCase):
     def test_new_listener_starts_before_the_old_one_ends(self) -> None:
         order: list[str] = []
         first_end = self.connection.subscriptions[5].inner
-        self.connection.subscriptions[5].inner = lambda: (order.append("old ended"), first_end())
+        self.connection.subscriptions[5].inner = lambda: (
+            order.append("old ended"),
+            first_end(),
+        )
         subscribe = self.core.subscribe
 
         def recording(connection, msg) -> None:
@@ -309,7 +328,9 @@ class LiveSubscriptionsTest(unittest.TestCase):
         self.assertFalse(self.core.calls[1]["ended"])
 
 
-def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
+def _forward_entity_changes(
+    send_message, entity_ids, entity_filter, user, message_id, event
+):
     """Stand-in for Home Assistant's listener with the same name and arguments."""
 
 
@@ -321,10 +342,21 @@ def _other_listener(event):
     """Another integration's listener."""
 
 
-def _job(connection, msg_id, entity_ids=None, entity_filter=None, func=_forward_entity_changes):
+def _job(
+    connection,
+    msg_id,
+    entity_ids=None,
+    entity_filter=None,
+    func=_forward_entity_changes,
+):
     """One item in the listener list of the event bus, in Home Assistant's layout."""
     listener = functools.partial(
-        func, connection.send_message, entity_ids, entity_filter, connection.user, str(msg_id).encode()
+        func,
+        connection.send_message,
+        entity_ids,
+        entity_filter,
+        connection.user,
+        str(msg_id).encode(),
     )
     return (SimpleNamespace(target=listener), None)
 
@@ -345,7 +377,9 @@ class UnfilteredSubscriptionsTest(unittest.TestCase):
 
     def test_subscription_with_a_list_or_a_filter_is_left_out(self) -> None:
         self.assertEqual(self._found(_job(self.page, 5, entity_ids={"sensor.a"})), [])
-        self.assertEqual(self._found(_job(self.page, 5, entity_filter=lambda e: True)), [])
+        self.assertEqual(
+            self._found(_job(self.page, 5, entity_filter=lambda e: True)), []
+        )
 
     def test_other_listeners_are_left_out(self) -> None:
         plain = (SimpleNamespace(target=_other_listener), None)
@@ -356,10 +390,14 @@ class UnfilteredSubscriptionsTest(unittest.TestCase):
         self.assertEqual(self._found(plain, other, broken, odd), [])
 
     def test_function_of_the_same_name_in_another_module_is_left_out(self) -> None:
-        def _forward_entity_changes(send_message, entity_ids, entity_filter, user, message_id, event):
+        def _forward_entity_changes(
+            send_message, entity_ids, entity_filter, user, message_id, event
+        ):
             """A copy of Home Assistant's listener in another integration."""
 
-        self.assertEqual(self._found(_job(self.page, 5, func=_forward_entity_changes)), [])
+        self.assertEqual(
+            self._found(_job(self.page, 5, func=_forward_entity_changes)), []
+        )
 
     def test_subscription_that_the_page_ended_is_left_out(self) -> None:
         self.assertEqual(self._found(_job(self.page, 9)), [])
@@ -404,7 +442,9 @@ class AdoptTest(unittest.TestCase):
 
     def test_adopted_subscription_is_narrowed_in_place(self) -> None:
         held = ["sensor.a", "sensor.b", "sensor.other"]
-        self.assertTrue(self.live.adopt(self.connection, 5, held, {"sensor.a", "sensor.b"}))
+        self.assertTrue(
+            self.live.adopt(self.connection, 5, held, {"sensor.a", "sensor.b"})
+        )
         self.assertTrue(self.core.calls[0]["ended"])
         self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.b"])
         self.assertEqual(self.connection.results, [5])
@@ -414,9 +454,13 @@ class AdoptTest(unittest.TestCase):
         )
         self.assertEqual(len(self.live), 1)
 
-    def test_adopted_subscription_is_narrowed_also_when_the_page_holds_no_other_entity(self) -> None:
+    def test_adopted_subscription_is_narrowed_also_when_the_page_holds_no_other_entity(
+        self,
+    ) -> None:
         # Early in a start, the page can hold only the entities on its dashboards.
-        self.assertTrue(self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a", "sensor.b"}))
+        self.assertTrue(
+            self.live.adopt(self.connection, 5, ["sensor.a"], {"sensor.a", "sensor.b"})
+        )
         self.assertTrue(self.core.calls[0]["ended"])
         self.assertEqual(self.core.calls[1]["entity_ids"], ["sensor.a", "sensor.b"])
 
@@ -432,7 +476,9 @@ class AdoptTest(unittest.TestCase):
         self.assertIsNone(self.core.calls[0]["entity_ids"])
         self.assertIn(5, self.connection.subscriptions)
         self.assertEqual(len(self.live), 0)
-        self.assertFalse(any("r" in message["event"] for message in self.connection.messages))
+        self.assertFalse(
+            any("r" in message["event"] for message in self.connection.messages)
+        )
         # The connection's function still ends that first listener.
         self.connection.subscriptions.pop(5)()
         self.assertTrue(self.core.calls[0]["ended"])
@@ -467,7 +513,9 @@ class AdoptTest(unittest.TestCase):
         self.core.fail_narrowed = True
         with self.assertLogs(_groups._LOGGER, level="ERROR") as logs:
             self.assertFalse(
-                self.live.adopt(self.connection, 5, ["sensor.a", "sensor.x"], {"sensor.a"})
+                self.live.adopt(
+                    self.connection, 5, ["sensor.a", "sensor.x"], {"sensor.a"}
+                )
             )
         self.assertEqual(len(logs.records), 1)
         # The handler failed after it made its listener. That listener ended.
@@ -475,13 +523,17 @@ class AdoptTest(unittest.TestCase):
         self._assert_page_keeps_all_states()
 
     def test_missing_subscription_is_not_adopted(self) -> None:
-        self.assertFalse(self.live.adopt(self.connection, 9, ["sensor.a"], {"sensor.a"}))
+        self.assertFalse(
+            self.live.adopt(self.connection, 9, ["sensor.a"], {"sensor.a"})
+        )
         self.assertEqual(len(self.core.calls), 1)
 
     def test_subscription_of_this_object_is_not_adopted(self) -> None:
         other = _Connection()
         self.live.start(other, _page_msg(7), {"sensor.a"})
-        self.assertFalse(self.live.adopt(other, 7, ["sensor.a", "sensor.b"], {"sensor.b"}))
+        self.assertFalse(
+            self.live.adopt(other, 7, ["sensor.a", "sensor.b"], {"sensor.b"})
+        )
         self.assertEqual(self.live.items()[0].entities, {"sensor.a"})
         self.assertIn(7, other.subscriptions)
 

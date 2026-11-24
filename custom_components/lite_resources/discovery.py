@@ -142,7 +142,10 @@ def _control_domains(card: dict[str, Any]) -> frozenset[str]:
     domains: set[str] = set()
     features = card.get("features")
     for feature in features if isinstance(features, list) else []:
-        if not isinstance(feature, dict) or feature.get("type") != AREA_CONTROLS_FEATURE:
+        if (
+            not isinstance(feature, dict)
+            or feature.get("type") != AREA_CONTROLS_FEATURE
+        ):
             continue
         controls = feature.get("controls")
         if not isinstance(controls, list):
@@ -243,7 +246,9 @@ def unscoped_reason(config: Any) -> str | None:
         if isinstance(node, dict):
             card_type = node.get("type")
             if isinstance(card_type, str) and card_type in UNSCOPED_TYPES:
-                return f"the card or badge {card_type}, which finds its entities by itself"
+                return (
+                    f"the card or badge {card_type}, which finds its entities by itself"
+                )
             todo.extend(value for key, value in node.items() if key != FEATURES_KEY)
         elif isinstance(node, list):
             todo.extend(node)
@@ -331,7 +336,9 @@ def registry_entities(hass: Any) -> list[RegistryEntity]:
                 area_id=area_id,
                 platform=entry.platform,
                 hidden=entry.hidden,
-                category=str(getattr(category, "value", category)) if category else None,
+                category=str(getattr(category, "value", category))
+                if category
+                else None,
                 device_class=device_class,
             )
         )
