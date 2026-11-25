@@ -1,7 +1,7 @@
-"""Groups of lite users, and the narrowed state subscriptions that their open pages hold.
+"""Groups of lite users, and the filtered state subscriptions of their open pages.
 
-The cases come from two sets of panels in one home: a workshop's kiosks, which show
-one dashboard, and a kitchen tablet, which shows another.
+The cases come from one home with two sets of devices. The workshop's devices show one
+dashboard, and the kitchen's tablet shows another.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ class GroupLookupTest(unittest.TestCase):
         self.assertEqual(_groups.groups_with_dashboard(GROUPS, None), [KITCHEN])
 
     def test_user_of_another_group_is_reported(self) -> None:
-        # A new group that takes a kiosk user and a new user.
+        # A new group that takes a user of the workshop group and a new user.
         self.assertEqual(
             _groups.users_in_other_groups(GROUPS, None, ["u-w1", "u-new"]), {"u-w1"}
         )
@@ -168,7 +168,7 @@ class _Connection:
 
 
 class _Core:
-    """Home Assistant's subscribe_entities handler, reduced to what the pages see."""
+    """Home Assistant's subscribe_entities handler, with only what the pages see."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -362,7 +362,7 @@ def _job(
 
 
 class UnfilteredSubscriptionsTest(unittest.TestCase):
-    """The state subscriptions for all entities that the event bus holds."""
+    """The subscriptions to all states that the event bus holds."""
 
     def setUp(self) -> None:
         self.page = _Connection()
@@ -431,7 +431,7 @@ class UnfilteredSubscriptionsTest(unittest.TestCase):
 
 
 class AdoptTest(unittest.TestCase):
-    """A subscription for all entities that Home Assistant's handler made."""
+    """A subscription to all states that Home Assistant's handler made."""
 
     def setUp(self) -> None:
         self.core = _Core()
@@ -471,7 +471,7 @@ class AdoptTest(unittest.TestCase):
         self.assertEqual(self.core.calls[-1]["entity_ids"], ["sensor.a", "sensor.c"])
 
     def _assert_page_keeps_all_states(self) -> None:
-        """The page keeps the listener for all entities that Home Assistant made."""
+        """The page keeps the listener for all states that Home Assistant made."""
         self.assertFalse(self.core.calls[0]["ended"])
         self.assertIsNone(self.core.calls[0]["entity_ids"])
         self.assertIn(5, self.connection.subscriptions)

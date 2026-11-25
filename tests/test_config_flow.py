@@ -193,7 +193,7 @@ class GroupFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs((await _fields({}, True))["filter_states"][0], True)
 
     async def test_state_filter_of_a_stored_group_shows_its_value(self) -> None:
-        # A group with no such value does not narrow the states.
+        # A group with no such value does not filter the states.
         self.assertIs(
             (await _fields({"users": ["u-w1"]}, False))["filter_states"][0], False
         )

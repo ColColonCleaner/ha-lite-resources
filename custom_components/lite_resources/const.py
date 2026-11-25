@@ -1,4 +1,4 @@
-"""Constants for Lite Resources."""
+"""Constants for this integration."""
 
 DOMAIN = "lite_resources"
 
@@ -20,12 +20,13 @@ REGISTRY_EVENTS = (
 # The registries change in bursts. The open pages get one update this number of seconds
 # after the first change of a burst.
 REGISTRY_REFRESH_DELAY = 10
-# The longest wait in seconds for one scan. The changes to the open pages run one after
-# the other, so a scan with no end would hold each later change.
+# The timeout in seconds of one entity scan or one resource scan. The changes to the
+# open pages run one after the other, so an entity scan with no end would hold each
+# later change.
 SCAN_TIMEOUT = 30
-# A failed scan of a group asks for one more update of that group, and that update
-# starts REGISTRY_REFRESH_DELAY seconds after the request. This is the number of failed
-# scans in a row after which no further update is asked for.
+# A failed entity scan of a group gets a retry: one more update of that group, which
+# starts REGISTRY_REFRESH_DELAY seconds after the request. This is the largest number
+# of retries in a row for one group.
 UPDATE_RETRIES = 6
 
 CONF_USERS = "users"
@@ -36,7 +37,7 @@ CONF_INCLUDE_UNSCANNABLE = "include_unscannable"
 CONF_FILTER_STATES = "filter_states"
 CONF_EXTRA_ENTITIES = "extra_entities"
 
-# The websocket command the frontend uses to stream entity states.
+# The websocket command the frontend uses to subscribe to entity states.
 WS_SUBSCRIBE_ENTITIES = "subscribe_entities"
 
 # Always sent when filtering states: the frontend uses these outside any card.
@@ -77,7 +78,7 @@ VALUE_HINTS: dict[str, str] = {
 }
 
 # Custom cards that show one integration's entities. The card gets the list from the
-# integration, and it reads each entity's state from the state stream.
+# integration, and it reads each entity's state from the page's state subscription.
 # card type -> the integration whose entities the card shows.
 CARD_PLATFORMS: dict[str, str] = {
     # Scheduler card: a schedule is a switch that the scheduler integration provides. The

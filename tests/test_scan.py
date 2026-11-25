@@ -1,8 +1,8 @@
-"""What a dashboard scan gives a state subscription, and when it gives nothing.
+"""What the entity scan gives a state subscription, and when it gives nothing.
 
-Each case comes from a review finding on the scan: a dashboard that names no entity
-because the browser makes its cards, a card that shows each entity in a domain, and an
-entity ID that the search of a dashboard's JSON text did not see.
+Each case comes from a review finding on the entity scan: a dashboard that names no
+entity because the browser makes its cards, a card that shows each entity in a domain,
+and an entity ID that a read of a dashboard's JSON text did not find.
 """
 
 from __future__ import annotations
@@ -174,7 +174,8 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_dashboard_that_cannot_be_loaded_stops_the_narrowing(self) -> None:
         # A YAML dashboard with a syntax error can load after a correction, and no event
-        # is sure to come then. So the group is not narrowed, and the caller tries again.
+        # is sure to come then. So the entity scan gives no result, and the caller
+        # retries it.
         plain = _cards({"type": "tile", "entity": "light.hall"})
         with self.assertRaises(CannotNarrow) as raised:
             await _entities({"plain": plain, "yaml": "broken"})
@@ -236,7 +237,7 @@ class CannotNarrowTest(unittest.IsolatedAsyncioTestCase):
 
 
 class EntityScanTest(unittest.IsolatedAsyncioTestCase):
-    """The entities that a stored dashboard's scan finds."""
+    """The entities that the entity scan finds in a stored dashboard."""
 
     async def test_entity_after_a_line_break_or_a_tab_in_a_string(self) -> None:
         card = {

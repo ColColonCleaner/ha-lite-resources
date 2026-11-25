@@ -91,7 +91,7 @@ _CONCAT_ANY = re.compile(
     rb"""(\+\s*)?(["'])([a-z0-9_-]+)\2\s*\+\s*(["'])([a-z0-9_-]+)\4(?!\s*\+)"""
 )
 # A registration whose name is no quoted text, such as the call inside a minified
-# decorator. The scan cannot see which names such a file registers.
+# decorator. The resource scan cannot read which names such a file registers.
 _DEFINE_OPAQUE = re.compile(rb"""customElements\.define\(\s*[A-Za-z_$]""")
 # The key "type" as a whole word. A key that ends in "type", such as layout_type, is a
 # card's option and no registration.
@@ -105,7 +105,8 @@ _STRATEGY_TYPE = re.compile(
 _QUOTED = re.compile(rb"""["'`]([a-z][a-z0-9_]*(?:-[a-z0-9_]+)+)["'`]""")
 _CARDISH = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$")
 # File names that do not identify one card. An unreadable resource with one of
-# these names stays under the "include resources that can't be checked" option.
+# these names stays under the option "Include resources that the integration cannot
+# read".
 _GENERIC_STEMS = frozenset(
     {
         "app",
@@ -148,7 +149,10 @@ _CHANGE_LISTENERS: list[Callable[[Any], None]] = []
 
 
 def _warn_change(key: tuple[Any, ...], value: Any, message: str, *args: Any) -> None:
-    """Log a warning when its value is new. A warning at each request hides a new one."""
+    """Write a warning to the log when its value is new.
+
+    A warning at each request hides a new one.
+    """
     if _WARNED.get(key, _NOT_SEEN) != value:
         _WARNED[key] = value
         _LOGGER.warning(message, *args)
@@ -158,7 +162,7 @@ class CannotNarrow(Exception):
     """The dashboards of a group do not say what a page in that group needs.
 
     The caller then sends all states, or the full resource list. The text is the reason.
-    `retry` is True when a later try can work, such as after a dashboard load that failed.
+    `retry` is True when a retry can work, such as after a dashboard load that failed.
     """
 
     def __init__(self, reason: str, retry: bool = False) -> None:
@@ -168,19 +172,20 @@ class CannotNarrow(Exception):
 
 @dataclass
 class Resolution:
-    """Outcome of resolving the resources for a set of dashboards."""
+    """Outcome of the resource scan for a set of dashboards."""
 
     included: list[dict[str, Any]] = field(default_factory=list)
     excluded: list[dict[str, Any]] = field(default_factory=list)
     needed_types: list[str] = field(default_factory=list)
     unresolved_types: list[str] = field(default_factory=list)
     unverified_types: list[str] = field(default_factory=list)
-    # Needed types that no file registers in a way that the scan sees. Each file that
-    # names such a type in quotes is included for it.
+    # Needed types that no file registers in a way that the resource scan can read. Each
+    # file that names such a type in quotes is included for it.
     guessed_types: list[str] = field(default_factory=list)
-    # Readable files in which the scan sees no element, which are not included. Such a
-    # file works by a side effect, such as an icon set, or it is a card that the
-    # dashboards do not use and whose registration the scan cannot see.
+    # Readable files in which the resource scan finds no element, which are not
+    # included. Such a file works by a side effect, such as an icon set, or it is a card
+    # that the dashboards do not use and whose registration the resource scan cannot
+    # read.
     excluded_without_element: list[str] = field(default_factory=list)
     dashboards: list[str] = field(default_factory=list)
 
@@ -228,8 +233,9 @@ class FileCache:
             found = names_in_javascript(data, _stem_from_filename(candidate))
             mentioned: frozenset[str] = frozenset()
             if _DEFINE_OPAQUE.search(data):
-                # Only such a file can register a name that the scan does not see. A file
-                # whose registrations all have a quoted name registers no other one.
+                # Only such a file can register a name that the resource scan cannot
+                # read. A file whose registrations all have a quoted name registers no
+                # other one.
                 pairs = (
                     (left + right).decode()
                     for plus, _q1, left, _q2, right in _CONCAT_ANY.findall(data)
@@ -270,7 +276,7 @@ def names_in_javascript(data: bytes, stem: str = "") -> frozenset[str]:
     still counts (``button-card.js`` containing ``"button-card"``).
     """
     found: set[str] = set()
-    # A minified file binds one short name more than one time, so each value counts.
+    # A minified file binds one short name more than once, so each value counts.
     bindings: dict[str, set[str]] = {}
     for ident, _quote, value in _ASSIGN.findall(data):
         bindings.setdefault(ident.decode(), set()).add(value.decode())
@@ -447,7 +453,7 @@ def scan_dashboard(key: str, config: Any) -> DashboardScan:
 async def _async_dashboard_scans(
     hass: HomeAssistant, keys: list[str]
 ) -> tuple[list[DashboardScan], list[str], dict[str, str]]:
-    """Return a scan of each dashboard with a stored configuration.
+    """Return the DashboardScan of each dashboard with a stored configuration.
 
     The second value names each dashboard that exists and has no stored configuration,
     so the browser makes its cards. The third value gives the error text for each
@@ -501,7 +507,7 @@ async def _async_dashboard_scans(
 def _load_failure(failed: dict[str, str]) -> CannotNarrow:
     """Return the error for the first dashboard that could not be loaded.
 
-    Such a dashboard can load at a later try, so the error asks for one.
+    Such a dashboard can load at a retry, so the error asks for one.
     """
     key, error = next(iter(failed.items()))
     return CannotNarrow(f"the dashboard {key} cannot be loaded: {error}", retry=True)
@@ -512,13 +518,14 @@ def _note_state(url_path: str | None, state: Any) -> None:
 
     `state` is the configuration, _NO_CONFIG or _LOAD_FAILED. Each load by this
     integration comes here, whether an event came with it or not. So the listeners hear
-    of each change that this integration sees: a changed YAML file that a scan finds
-    first, and a dashboard that loads again after a fault. The first load of a dashboard
-    is no change. A load that fails is none either: the scan that found it tries again,
-    and the pages of each other group keep their entities until the dashboard loads. A
-    file that fires its event at each load gives the same configuration each time, so it
-    calls no listener. The first load after `note_event` calls none either, because the
-    event of that call started an update already.
+    of each change that this integration sees: a changed YAML file that an entity scan
+    or a resource scan finds first, and a dashboard that loads again after a fault. The
+    first load of a dashboard is no change. A load that fails is none either: the entity
+    scan that found it gets a retry, and the pages of each other group keep their
+    entities until the dashboard loads. A file that fires its event at each load gives
+    the same configuration each time, so it calls no listener. The first load after
+    `note_event` calls none either, because the event of that call started an update
+    already.
     """
     previous = _SEEN.get(url_path, _NOT_SEEN)
     if state is _LOAD_FAILED:
@@ -544,9 +551,10 @@ def note_event(url_path: str | None) -> None:
     """Record an update event of this dashboard that came from another task.
 
     Such an event comes from a save, or from the load of a browser that found a changed
-    YAML file. The caller starts an update of each group with the dashboard. The scans
-    of that update load the configuration that the event announced, so the first load
-    after the event is no second change. A change after that load is a change again.
+    YAML file. The caller starts an update of each group with the dashboard. The entity
+    scans of that update load the configuration that the event announced, so the first
+    load after the event is no second change. A change after that load is a change
+    again.
     """
     _SEEN[url_path] = _ANNOUNCED
 
@@ -564,20 +572,24 @@ def _configuration_text(config: Any) -> str:
 
 
 def is_own_load(url_path: str | None) -> bool:
-    """True while a scan in the current task loads the dashboard with this URL path.
+    """True while this integration loads this dashboard in the current task.
 
-    Home Assistant fires the update event of a YAML dashboard inside the load that finds
-    the changed file, and it calls each listener at once, in the task of that load. So a
-    listener that gets True here sees the event of the scan's own load. The scan itself
-    reports the change, through the change listeners. An event from the load of another
-    task gives False.
+    An entity scan and a resource scan each load a group's dashboards. Home Assistant
+    fires the update event of a YAML dashboard inside the load that finds the changed
+    file, and it calls each listener immediately, in the task of that load. So a
+    listener that gets True here sees the event of a load that this integration
+    started. The integration itself reports the change, through the change listeners.
+    An event from the load of another task gives False.
     """
     load = _OWN_LOAD.get()
     return load is not None and load["active"] and load["url_path"] == url_path
 
 
 def forget_warnings() -> None:
-    """Forget each warning of this module, so that a new setup logs its warnings again."""
+    """Forget each warning of this module.
+
+    A new setup then writes its warnings to the log again.
+    """
     _WARNED.clear()
 
 
@@ -600,7 +612,7 @@ async def async_dashboard_entities(
 ) -> set[str]:
     """Return every entity the configured dashboards can show.
 
-    Any existing entity id that appears anywhere in the dashboards (cards, pop-ups,
+    Any existing entity ID that appears anywhere in the dashboards (cards, pop-ups,
     conditions, actions), the entities that a card finds by itself (the area card, a card
     in CARD_PLATFORMS, and a card that shows each entity in a domain), the members of any
     groups among them, the person entity of each user in the group, the configured extras,
@@ -609,16 +621,17 @@ async def async_dashboard_entities(
     CannotNarrow is raised when the dashboards do not say which entities a page needs: a
     dashboard with no stored configuration, a strategy, or a card that no rule follows.
 
-    `include_missing` keeps each name that has no state now. A state subscription needs
-    those names: the stream sends only the entities in its list, and an entity can get its
-    first state after a page connects, for example while Home Assistant starts.
+    `include_missing` keeps each entity ID that has no state now. A state subscription
+    needs those entity IDs: Home Assistant sends only the entities in the subscription's
+    list, and an entity can get its first state after a page connects, for example while
+    Home Assistant starts.
     """
     scans, without_config, failed = await _async_dashboard_scans(
         hass, list(options.get(CONF_DASHBOARDS, []))
     )
     if failed:
         # A page can open this dashboard after a correction, so a set with no entity of
-        # that dashboard is no result. The caller tries again later.
+        # that dashboard is no result. The caller retries the entity scan later.
         raise _load_failure(failed)
     if without_config:
         raise CannotNarrow(
@@ -668,7 +681,7 @@ async def async_dashboard_entities(
     if wide:
         found.update(state.entity_id for state in states if state.domain in wide)
         found.update(entity.entity_id for entity in entities if entity.domain in wide)
-    # The frontend finds the signed-in user's person by a search of all states, for a
+    # The frontend finds the logged-in user's person by a search of all states, for a
     # condition on the user's location and for the user's picture.
     users = set(options.get(CONF_USERS, []))
     found.update(
@@ -698,8 +711,9 @@ async def async_dashboard_entities(
                         found.add(member)
                         todo.append(member)
     if include_missing:
-        # A name with no state that is an action's name, such as light.turn_on, is
-        # no entity. Each other name with no state stays: its first state can come later.
+        # An entity ID with no state that is an action's name, such as light.turn_on, is
+        # no entity. Each other entity ID with no state stays: its first state can come
+        # later.
         return {
             entity_id
             for entity_id in found
@@ -759,7 +773,8 @@ async def async_resolve(
     refused: set[str] = set()
     # The readable files that provide no needed type, each with its path.
     unmatched: list[tuple[dict[str, Any], str, frozenset[str]]] = []
-    # The names that a file registers. None for a file that the scan cannot read.
+    # The names that a file registers. None for a file that the resource scan cannot
+    # read.
     names: frozenset[str] | None
     for item in await async_all_resources(hass):
         url = item.get("url", "")
@@ -798,10 +813,10 @@ async def async_resolve(
         else:
             unmatched.append((item, path, names))
 
-    # A file can register an element in a way that the scan does not see, such as a
-    # minified decorator. So for a needed type that no file provides, each file that
-    # names the type in quotes is included. A type with a provider never takes this way,
-    # so a file that only mentions another file's card stays out.
+    # A file can register an element in a way that the resource scan cannot read, such
+    # as a minified decorator. So for a needed type that no file provides, each file
+    # that names the type in quotes is included. A type with a provider never takes this
+    # way, so a file that only mentions another file's card stays out.
     guessed: set[str] = set()
     for item, path, names in unmatched:
         missing = needed - provided - refused
@@ -815,8 +830,9 @@ async def async_resolve(
             continue
         result.excluded.append(item)
         if not names:
-            # The scan sees no element in the file. Such a file works by a side effect,
-            # or it is a card whose registration the scan cannot see.
+            # The resource scan finds no element in the file. Such a file works by a
+            # side effect, or it is a card whose registration the resource scan cannot
+            # read.
             result.excluded_without_element.append(item.get("url", ""))
     provided |= guessed
     result.guessed_types = sorted(guessed)

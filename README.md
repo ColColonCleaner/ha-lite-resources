@@ -1,68 +1,71 @@
-# Lite Resources
+# ha-lite-resources
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/docs/faq/custom_repositories)
 [![Release](https://img.shields.io/github/v/release/ColColonCleaner/ha-lite-resources)](https://github.com/ColColonCleaner/ha-lite-resources/releases)
 [![Validate](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml/badge.svg)](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Make Home Assistant dashboards fast on wall panels, old tablets and other low-powered screens - without changing anything for your phones and computers.**
+**Make Home Assistant dashboards fast on wall panels, old tablets and other low-powered devices, without changing anything for your phones and computers.**
 
 ## What this fork changes
 
-This repository is a fork of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources), from its version 0.2.1. It needs Home Assistant 2026.11 or later, where the original needs 2025.1. The [changelog](CHANGELOG.md) holds each change in full.
+This repository is a fork of version 0.2.1 of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). The fork needs Home Assistant 2026.11 or later. On an older version, use the original, which needs Home Assistant 2025.1 or later. The [changelog](CHANGELOG.md) describes each change in full.
+
+This integration makes a dashboard fast on a slow device. You choose the Home Assistant users that your slow devices log in as. These users are the lite users. The integration reads their dashboards, and it sends those devices only what the dashboards use.
+
+**Resource filtering** sends only the resources that the dashboards need. A resource is an entry in Home Assistant's list of dashboard resources, and in most cases it names the JavaScript file of a custom card. **State filtering** sends only the states of the entities that the dashboards show. The integration finds those resources with a **resource scan** of the dashboards, and those entities with an **entity scan**. A **page** is one browser tab or app window that shows Home Assistant.
 
 ### Added features
 
-- **Groups of lite users.** Each [group](#groups) has its own users, dashboards and options, and a user is in one group only. The update turns a 0.2.x setup into one group by itself.
-- **An open panel follows each change with no page load:** a saved dashboard, a changed group, and a change in the entity, device or area registry.
-- **A changed YAML dashboard file** reaches each open panel at the next load of that dashboard.
-- **A group that cannot be narrowed gets all states, and the log says why.** This holds for a dashboard that a strategy builds, and for a card that reads all entities, such as an energy card. See [When a group's states are not narrowed](#when-a-groups-states-are-not-narrowed).
-- **Each scan has a time limit of 30 seconds, and a failed scan gets up to 6 later tries.**
-- **The scan keeps more of the files that a panel needs:** the file of a card that registers itself in a way that the scan cannot read, and the WebRTC Camera script for an Advanced Camera Card.
-- **The action `lite_resources.preview` gives one item for each group,** with the count of its open pages and the reason when the group is not narrowed.
-- **The group form checks its values.** It refuses a group with no name, no user or no dashboard, and a user of another group.
-- **Tests and code style.** Unit tests for each part of the integration, static checks with `ruff` and `mypy`, one script that runs each validation before a commit, and a workflow that makes each release.
+- **Each set of devices can have its own dashboards.** A [group](#groups) holds the users that one set of devices logs in as, and the dashboards that those devices show.
+- **The entities of a saved dashboard reach the open pages immediately.** When you save a dashboard or change a group, each open page of the group gets the states of the new entities without a page reload. Only a custom card type that is new to the dashboards needs one page reload.
+- **An edit to the file of a YAML dashboard reaches the open pages when a page next opens that dashboard.** Home Assistant reads the file again at that time. Each open page of a group with that dashboard then gets the states of the new entities.
+- **Entity and resource scans now have a timeout, and entity scans have retries.** An entity scan or a resource scan that hangs no longer blocks a page for more than 30 seconds. The integration retries a failed entity scan automatically, up to 6 times. Until the entity scan succeeds, a page that connects gets all states. Until the resource scan succeeds, a page that loads gets all resources.
+- **A card in a minified file now loads.** The integration finds a card's resource by the card type that the resource file registers, and some minified files hide that registration. For such a card, the integration now sends each resource whose file names the card type.
+- **The action `lite_resources.preview` shows what each group gets.** For each group, the action shows the resources and the entities that the group's pages get. It also shows the reason when state filtering or resource filtering is off.
+- **The group form validates its input.** The form rejects a group with no name, no user or no dashboard. It also rejects a user that is already in another group.
+- **Unit tests and static checks cover the integration.** `ruff` runs the static checks, and `mypy` runs the type checks. One script runs the full validation before a commit, and a workflow makes each release.
 
-### Fixed issues of the original
+### Corrections to the original
 
-Each fault in this list is in the original at its version 0.2.1. A fault that this fork made and then corrected is not in the list, and the changelog holds those.
+Version 0.2.1 of the original had these faults, and this integration corrects them.
 
-- **A restart of Home Assistant gave a panel every entity again.** A panel that connected again before the integration's setup kept the stream of all states until its next page load.
-- **A card that finds its entities by itself got none of them.** The scan took only the entity IDs that a dashboard's configuration names. So an area card, a scheduler card and a map card that shows all devices stayed without their entities.
-- **An entity with no state at the time of the page load never arrived,** such as an entity of an integration that starts late.
-- **A dashboard with no stored configuration gave a panel two entities,** `sun.sun` and `zone.home`, with no line in the log. The default dashboard before its first edit is such a dashboard. A dashboard that a strategy builds had a like result.
-- **`Overview (default)` named the wrong dashboard** when a dashboard with the URL `lovelace` exists, as in YAML mode.
-- **The scan read a dashboard as JSON text.** It missed an entity ID directly after a line break in a text. A value that JSON cannot hold turned the state filter off, with an error in the log at each page load.
-- **A card type inside a template was not seen,** so the panel did not get the card's file.
-- **One resource file that could not be read made each page load send the full list,** with an error in the log. A YAML dashboard whose file is gone had the same effect, also for the states.
-- **Each signed-in user could call `lite_resources.preview`,** which names the users, the dashboards and the entities. The action is now for administrators only.
-- **The settings form could not be saved** while it held a deleted user, a deleted dashboard, or a resource whose URL changed.
-- **A removal or an unload of the integration left each open panel with its narrowed states** until its next page load.
-- **A connection that closed during a scan left a state listener** until the restart of Home Assistant, and a scan had no time limit.
-- **Smaller faults of the resource scan.** A resource URL with a host counted as a local file, and `Always include` and `Always exclude` ignored the host. Joined pieces of a name in a file gave wrong card names. One warning came at each page load, and one kind of warning never came.
+- **State filtering survives a Home Assistant restart.** After a restart, a page can reconnect before Home Assistant sets the integration up. In the original, such a page got all states until its next page reload.
+- **The area card, the scheduler card and the map card show their entities.** These cards find their entities themselves, and the stored dashboard does not list those entities. The original sent no states for them.
+- **An entity that gets its first state late still shows on the page.** The original left out an entity that had no state yet when the page connected, such as an entity of an integration that starts slowly.
+- **A dashboard that does not list its entities now shows all of them.** Home Assistant builds some dashboards automatically, such as the default dashboard before its first edit. For such a dashboard, the original sent the states of only two entities, `sun.sun` and `zone.home`, and the log said nothing. For a card that reads all entities, such as an energy card, the original sent no states for that card. This integration sends all states to the group of such a dashboard, and the log says why. See [When state filtering is off for a group](#when-state-filtering-is-off-for-a-group).
+- **The choice `Overview (default)` now selects the dashboard that Home Assistant shows as its default.** This choice is in the option **Their dashboards**. When a dashboard with the URL path `lovelace` exists, Home Assistant 2026.11 shows that dashboard as its default, and the original read a different one.
+- **The integration finds an entity in a multi-line template.** The original missed an entity ID that directly follows a line break, so that entity showed as unavailable.
+- **A custom card that only a template names now loads.** The original found a card type only where it is the whole value of a key. So it missed a card type inside a template, such as a template that returns `{type: 'custom:...'}`, and that card failed to load.
+- **The Advanced Camera Card gets the resource for a WebRTC live view.** A camera that uses the custom integration WebRTC Camera for its live view needs a resource of that integration, and no card type in the dashboard names that resource. The original did not send it unless you listed it under **Always include**.
+- **One unreadable resource file no longer turns resource filtering off.** In the original, one unreadable resource file made the integration send every resource at each page reload, with an error in the log. A YAML dashboard whose file is missing did the same. Now an unreadable resource file counts as a resource that the integration cannot read, and the resource scan leaves out a dashboard that Home Assistant cannot load.
+- **Only administrators can perform `lite_resources.preview`.** Its response names users, dashboards and entities, and the original let any user perform it.
+- **You can save the group form after you delete a user or a dashboard in Home Assistant.** The original refused to save the form while it still held the deleted item.
+- **Removing the integration restores all states immediately.** The original left each open page with filtered states until its next page reload.
+- **This integration also corrects five smaller faults.** The integration no longer mistakes a resource on another server for a local file. **Always include** and **Always exclude** now match a resource by its server and its path, where the original matched by the path alone. The resource scan no longer mistakes unrelated text in a file for a card type. Each warning appears in the log once, and not at each page reload. A page that disconnects during an entity scan no longer leaves an unused event listener in Home Assistant until the next restart.
 
 ## What it does
 
-Home Assistant sends every screen the same thing: *every* custom card you've ever installed, and a live update for *every* entity in your home, whether or not that screen shows it. A phone shrugs that off. A wall panel with a slow chip spends its life downloading JavaScript it never runs and processing updates for sensors it never displays - and you feel it as a laggy, stuttering dashboard.
+Home Assistant sends every device the same thing. That is *every* custom card that you ever installed, and a live update for *every* entity in your home. It does so whether or not the device shows them. A phone shrugs that off. A wall panel with a slow chip spends its life downloading JavaScript that it never runs and processing updates for sensors that it never displays. You feel that as a laggy, stuttering dashboard.
 
-Lite Resources fixes that for the users your panels log in as:
+This integration fixes that for the users that your slow devices log in as:
 
-| | Without | With Lite Resources |
+| | Without | With this integration |
 |---|---|---|
-| Custom card files loaded at start-up | all of them (25 files, ~9 MB here) | only the ones the panel's dashboard uses (2 here) |
-| Entities streamed live | every entity (2,955 here, ~28 updates a second) | only those on the panel's dashboard (89 here) |
+| Resources that a page loads | all of them (25 files, ~9MB in one home) | only the ones that the device's dashboards use (2 in that home) |
+| Entities whose states a page gets | every entity (2,955 in that home, ~28 updates a second) | only those on the device's dashboards (89 in that home) |
 | Your phone, tablet, desktop | unchanged | unchanged |
 
 <p align="center">
   <img src="docs/images/panel-landing.png" width="240" alt="Landing panel: lights and lighting modes">
   <img src="docs/images/panel-heating.png" width="240" alt="Heating tab">
   <img src="docs/images/panel-cameras.png" width="240" alt="Cameras tab">
-  <br><em>A Sonoff NSPanel Pro (480×480, Rockchip PX30) running a full Home Assistant dashboard with Lite Resources.</em>
+  <br><em>A Sonoff NSPanel Pro (480×480, Rockchip PX30) running a full Home Assistant dashboard with this integration.</em>
 </p>
 
 ## Who is it for?
 
-Anyone running a Home Assistant dashboard on hardware that struggles with it. For example:
+This integration is for anyone who runs a Home Assistant dashboard on hardware that struggles with it. For example:
 
 - **Sonoff NSPanel Pro** (Gen 1 / Gen 2) and other Android in-wall switch panels (Tuya, Moes, Shelly Wall Display, "86-box" panels)
 - **Amazon Fire tablets** (Fire 7 / HD 8 / HD 10) used as wall dashboards
@@ -77,202 +80,210 @@ The more custom cards you have installed and the more entities your home has, th
 
 ### Running View Assist / VACA?
 
-If you use [View Assist](https://github.com/dinki/View-Assist) with the **View Assist Companion App (VACA)** on a wall tablet or panel, this is for you. VACA's screen is a Home Assistant dashboard running on the same modest hardware that's also doing wake-word detection and audio - every bit of CPU the dashboard doesn't waste is CPU the voice side gets. Point Lite Resources at the user your VACA device logs in as and its View Assist dashboard(s). Voice, timers and VACA's device controls are unaffected: they don't use the dashboard's connection.
+If you use [View Assist](https://github.com/dinki/View-Assist) with the **View Assist Companion App (VACA)** on a wall tablet or a wall panel, this integration is for you. VACA shows a Home Assistant dashboard, and the same modest device also does wake-word detection and audio. Every bit of CPU that the dashboard does not waste is CPU that the voice side gets. Add a group with the user that your VACA device logs in as, and with the View Assist dashboards of that device. Voice, timers and VACA's device controls are unaffected, because they do not use the dashboard's connection.
 
 ## How it works
 
-Nothing is changed on disk and nothing is patched in the frontend. Lite Resources answers two of the frontend's own requests differently for the users you choose:
+This integration changes no file on disk, and it patches nothing in the frontend. For the users that you choose, it gives a different answer to two requests that the frontend sends to Home Assistant:
 
-1. **Resources** - the frontend asks once per page load for the list of dashboard resources (`lovelace/resources`). Lite users get only the resources their dashboards use. Lite Resources reads every dashboard you select (including one nothing links to), collects every `custom:` card type in that config (stacks, sections, conditional cards, pop-ups and features), and finds which resource files register them. A bundle that builds its element names in code is recognised too (`mushroom.js` provides `custom:mushroom-*-card`). A file is matched by its whole name, so `dreame-vacuum-card.js` is not treated as the Mushroom vacuum card and `lock-manager.js` is not treated as the Mushroom lock card. Mods with no card type are detected from dashboard keys (`card_mod` → card-mod, `kiosk_mode` → kiosk-mode).
-2. **States** (optional) - the frontend subscribes to every entity's state (`subscribe_entities`). Lite users' subscription is narrowed to the entities that appear anywhere in their dashboards (cards, pop-ups, conditions, actions), plus members of any groups, plus anything you add yourself.
+1. **Resources.** The frontend asks for the list of dashboard resources (`lovelace/resources`) each time the page loads. Lite users get only the resources that their dashboards use. The integration reads every dashboard that you select, whether or not another dashboard links to it. It collects every `custom:` card type in those dashboards, including the ones inside stacks, sections, conditional cards, pop-ups and features. Then it finds the resource files that register those card types. A resource file registers a card type when it gives the browser the code for that type. This work is the **resource scan**. The resource scan also recognises a bundle that builds its card types in code (`mushroom.js` provides `custom:mushroom-*-card`). For that, the whole file name must be the start of the card type. So `dreame-vacuum-card.js` does not count as the Mushroom vacuum card, and `lock-manager.js` does not count as the Mushroom lock card. Some resources change other cards or the page, and have no card type. Such a resource is a mod. The resource scan detects a mod from its key in the dashboard (`card_mod` → card-mod, `kiosk_mode` → kiosk-mode).
+2. **States** (optional). The frontend subscribes to the state of every entity (`subscribe_entities`). For lite users, the integration filters that subscription to the entities that appear anywhere in their dashboards (cards, pop-ups, conditions, actions). It also keeps the members of each entity group, such as a light group, and each entity that you add under **Extra entities**. The work that finds those entities is the **entity scan**.
 
-One more need has no card type. An Advanced Camera Card camera with `live_provider: webrtc-card`, or with the key `webrtc_card` and no live provider, needs the WebRTC Camera integration's script. Lite Resources keeps that script when a dashboard holds one of them.
+- The first answer is **resource filtering**, and the second is **state filtering**.
+- A **page** is one browser tab or app window that shows Home Assistant. Each page has its own connection to Home Assistant.
 
-Some cards name no entity, and find their entities by themselves. Lite Resources sends those entities too:
+Everyone else gets Home Assistant's normal behaviour. When you remove the integration, everything is exactly as before. Each open page gets all states again immediately.
 
-- The **area card** shows its area's camera, sensors, alerts and controls. Lite users get that area's entities that the card can show.
-- The **scheduler card** shows the scheduler integration's schedules. Lite users get each schedule, and the entities that it controls.
-- A **map card** with `show_all` gets each person, device tracker and zone. With `geo_location_sources` it gets each geo location entity.
-- The **updates card** gets each update entity.
-- A **tile card for a person** or a **tile card for a device tracker**, and a visibility condition on the user's **location**, get each zone.
-- Each lite user gets its own person entity, which the frontend reads for that condition and for the user's picture.
+The resource scan also finds one resource that no card type names. In the Advanced Camera Card, a camera with `live_provider: webrtc-card`, or with the key `webrtc_card` and no live provider, needs a resource from WebRTC Camera. The integration sends that resource when a dashboard holds such a camera.
 
-For another card of this kind, add its entities under *Extra entities*. Custom cards that select entities in the browser are of this kind: `auto-entities` with a domain filter, the entity list in the scheduler card's editor, and a template that builds an entity ID from a variable.
+Some cards name no entity, and find their entities themselves. This integration sends the states of those entities too:
 
-### When a group's states are not narrowed
+- The **area card** shows its area's camera, sensors, alerts and controls. Lite users get the entities that the card can show for that area.
+- The **scheduler card** shows the schedules of the scheduler integration. Lite users get each schedule, and the entities that it controls.
+- For a **map card** with `show_all`, lite users get each person, device tracker and zone. With `geo_location_sources`, they get each geo location entity.
+- For the **updates card**, lite users get each update entity.
+- Lite users get each zone when a dashboard holds a **tile card for a person**, a **tile card for a device tracker**, or a visibility condition on the user's **location**.
+- Each lite user gets the person entity of that user. The frontend reads it for a visibility condition on the user's location, and for the user's picture.
 
-Some dashboards do not say which entities a panel needs. A group with such a dashboard gets all states, as without this integration, and the log says why one time. `lite_resources.preview` says it too. The group's resources are still reduced.
+Some custom cards select their entities in the browser, so the dashboard names none of them. Examples are `auto-entities` with a domain filter, and a card with a template that builds an entity ID from a variable. The entity list in the scheduler card's editor is a further example. For each of these, add the entities under **Extra entities**.
 
-- A dashboard with no stored configuration. Home Assistant generates such a dashboard in the browser, such as the default dashboard before its first edit.
-- A dashboard, a view or a section with a **strategy**. The browser makes its cards. This holds also for a section in the sidebar of a view, and for a section inside another section.
+### When state filtering is off for a group
+
+Some dashboards do not list the entities that they show. State filtering is then off for each group with such a dashboard. The pages of that group get all states, as they do without this integration. The log gives the reason once, and `lite_resources.preview` gives it too. Resource filtering stays on for the group. These are the causes:
+
+- A dashboard that Home Assistant does not store. Home Assistant generates such a dashboard in the browser. The default dashboard before its first edit is an example.
+- A dashboard, a view or a section with a **strategy**. A strategy is a rule that the browser uses to build the cards, so the stored dashboard lists no card and no entity. The same is true for a section with a strategy that is in the sidebar of a view or inside another section.
 - The **home-summary** card, the **energy**, **water** and **power** cards, and the badges **power-total**, **gas-total** and **water-total**. They take their entities from all states or from the energy settings.
 
-On a slow panel, all states are the load that this integration exists to remove. When you save such a card to a dashboard in a group, each open panel in that group gets all states at once. So look at the log, or at the preview, after you change a dashboard in a group.
+**A device that gets all states carries the load that this integration exists to remove.** When you save one of these cards to a dashboard in a group, each open page of that group gets all states immediately. So check the log, or the preview action, after you change a dashboard in a group.
 
-A custom strategy that makes custom cards names no card in the stored dashboard. Add each such card's resource under *Always include*.
+A custom strategy can make custom cards, and the stored dashboard then names none of them. Add the resource of each such card under **Always include**.
 
-Two faults give all states only to a panel that connects during the fault, because no scan says which entities that panel needs. A panel that is open at that time keeps the entities that it has. The log gives each new reason one time.
+Two faults turn state filtering off for a page that connects while the fault lasts. During such a fault, the entity scan cannot find the entities that the page needs. A page that is already open keeps its entities. The log gives each new reason once.
 
-- A dashboard that Home Assistant cannot load, such as a YAML dashboard with a syntax error. Lite Resources tries the scan again by itself, about 10 seconds after each failed scan. After 7 failed scans in a row, the log says so. The next try then comes at the next change that the section *When a dashboard changes* names, or when one of the group's panels connects.
-- A scan that takes longer than 30 seconds, such as the load of a YAML dashboard from a share that does not answer. While that scan runs, Lite Resources starts no second scan of the group, unless you change the group. When the scan ends, the group gets a new scan.
+- A dashboard that Home Assistant cannot load, such as a YAML dashboard with a syntax error. The integration retries the entity scan automatically, about 10 seconds after each failure. After 6 failed retries, the automatic retries stop, and the log says so. The next entity scan then comes when you save a dashboard or change a group, or when a page of the group connects.
+- An entity scan that takes longer than 30 seconds, for example when a YAML dashboard is on a share that does not answer. The integration stops waiting after 30 seconds, and the entity scan goes on. While it runs, the integration starts no other entity scan for the group, unless you change the group. When it ends, the integration starts a new one for the group.
 
-When a scan works again, each open panel of the group is narrowed, and each gets the group's entities of that time.
-
-Everyone else gets Home Assistant's normal behaviour. Remove the integration and everything is exactly as before: each open panel gets all states again at once.
+When an entity scan next succeeds, state filtering is on again for each open page of the group. Each page then gets the group's current entities.
 
 ## Groups
 
-A group holds the users that one set of panels logs in as, and the dashboards that those panels show. Each group gets the resources and the states for its own dashboards. For example, a workshop's kiosks are one group, and a kitchen tablet is a second group with another dashboard. A user can be in one group only.
+A group holds the users that one set of devices logs in as, and the dashboards that those devices show. The devices of each group get the resources and the states for the dashboards of that group. For example, the users of the wall panels in a workshop are one group. The user of the tablet in a kitchen is a second group, with a different dashboard. A user can be in only one group.
 
-You do not list a group's resources. Lite Resources finds them from the group's dashboards at each page load. It finds the entities at each panel connection.
+You do not list a group's resources. The resource scan finds them from the group's dashboards each time a page loads. The entity scan finds the group's entities each time a page connects. A page connects when it loads, and again after a lost connection.
 
 ### When a dashboard changes
 
-Design the dashboards as a normal user, with every resource loaded. When you save a dashboard in a group, these things occur, and the integration needs no reload:
+Edit the dashboards as a normal user, not as a lite user. A lite user's browser loads only some of the custom cards, and the dashboard editor needs all of them. When you save a dashboard in a group, these things happen without a reload of the integration:
 
-- Home Assistant sends the new dashboard to each open panel. This is its standard behaviour.
-- Lite Resources finds the group's entities again. Each open panel in the group gets the states of the new entities at once, and loses the entities that left the dashboards.
-- A card type that is new on the dashboards loads on a panel at that panel's next page load. The frontend loads its resources one time for each page load, so that card shows an error on the panel until then.
+- Home Assistant sends the new dashboard to each open page. This is its normal behaviour.
+- The entity scan runs again. Each open page of the group gets the states of the new entities immediately, and loses the entities that are no longer on the dashboards.
+- A card type that is new to the dashboards loads on a page at the next reload of that page. The browser asks for the resource list only when the page loads, so the card shows an error on the page until then.
 
-A change to a group, such as a new user or a new dashboard, reaches the open panels the same way. So does a change to the entity, device or area registry, about 10 seconds after it: a new schedule, or an entity that moves into an area card's area.
+A change to a group, such as a new user or a new dashboard, reaches the open pages in the same way. A change to the entity, device or area registry does too, about 10 seconds after the change. Examples are a new schedule, and an entity that moves into the area of an area card.
 
-Three changes do not reach an open panel by themselves. The first is a change to the file of a YAML dashboard. Home Assistant reads that file again only when something loads the dashboard. So the change reaches the open panels at the next such load. That load comes when a panel or a browser opens the dashboard, or at the next change above. Each open panel of each group with that dashboard then gets the new entities.
+Three changes do not reach an open page immediately. The first is a change to the file of a YAML dashboard. Home Assistant reads that file again only when something loads the dashboard. So the change reaches the open pages at the next such load. That load comes when a page opens the dashboard, or when you next save a dashboard or change a group. Each open page that belongs to a group with that dashboard then gets the states of the new entities.
 
-The second is a new member of a light group. The third is a new entity that a schedule controls. Each of the two reaches a panel at its next page load or at the next change above.
+The second is a new member of a light group. The third is a new entity that an existing schedule controls. Both reach a page at the next reload of that page, or when you next save a dashboard or change a group.
 
 ### After a Home Assistant restart
 
-A panel connects again within seconds of a restart. Home Assistant sets a custom integration up some seconds later, so the panel's first state subscription is for every entity. When the Lite Resources setup runs, it finds that subscription and narrows it. The panel then drops the entities that its dashboards do not show, and it keeps its connection. The search for that subscription reads internals of Home Assistant 2026.11. On a version with another layout, the log holds a warning, and such a panel keeps all states until it connects again.
+A page reconnects within seconds of a restart. Home Assistant sets up a custom integration a few seconds later, so the page's first state subscription is for all states. When Home Assistant sets the integration up, the integration finds that subscription and filters it. The page then drops the entities that the dashboards of its group do not show, and it keeps its connection.
 
-One fault stays, and it is not in this integration. After a restart, a card with a camera can show no camera until the page loads again. In one home, a panel asked for its cameras 9 seconds after the start, and Home Assistant answered `Camera not found`, because the camera integration was not ready. So let each panel load its page again some minutes after a restart, for example with its kiosk browser's reload timer.
+To find that subscription, the integration reads internals of Home Assistant 2026.11. If a later version changes those internals, the log holds a warning. A page that connected before the setup then keeps all states until it next reconnects. If the log holds that warning, reload the page on each device after each restart.
+
+One fault remains, and it is not in this integration. After a restart, a card with a camera can fail to show the camera until a page reload. In one home, a page asked for its cameras 9 seconds after the restart, and Home Assistant answered `Camera not found`, because the camera integration was not ready. So let each device reload its page at an interval, for example with the reload timer of its kiosk browser.
 
 ## Install
 
-Lite Resources needs Home Assistant 2026.11 or later.
+This integration needs Home Assistant 2026.11 or later.
 
 ### Marketplace (recommended)
 
 The Marketplace replaced HACS in Home Assistant 2026.11.
 
-Do each of these steps:
+**If the original is installed, uninstall it first,** because both repositories install the same integration folder. Open **Settings → Marketplace**, and open `evski/ha-lite-resources` there. Select the three-dot menu (⋮) in the upper-right corner, then **Uninstall**, then **Delete and uninstall**. That also deletes the original's configuration, so write down its users and its dashboards first. You enter them again as a group in [Configuration](#configuration). A manual install keeps the configuration, as [Update from 0.2.x](#update-from-02x) describes.
+
+Follow these steps:
 
 1. Open **Settings → Marketplace**.
 2. Select **Add from link** in the upper-right corner.
 3. Under **GitHub link**, enter `https://github.com/ColColonCleaner/ha-lite-resources`, and select **Add**. If the Marketplace asks you to connect GitHub, do that first.
-4. Select **Lite Resources** in the list to open its page. Select **Install**, and **Install** again in the dialog.
-5. Restart Home Assistant. A repair under **Settings → System → Repairs** asks for the restart and can do it.
+4. Select **Lite Resources** in the Marketplace's list of repositories. Then select **Install**, and **Install** again in the dialog.
+5. Restart Home Assistant. A repair under **Settings → System → Repairs** asks for the restart, and you can restart from that repair.
 
-If the Marketplace holds `evski/ha-lite-resources`, uninstall that repository first, because both repositories install the same integration folder. Open that repository's page in the Marketplace. Select the three-dot menu (⋮) in the upper-right corner, then **Uninstall**, then **Delete and uninstall**. That also deletes its setup.
-
-To update later, open the repository's page in the Marketplace and install the new version, then restart Home Assistant.
+To update later, open the repository in the Marketplace and install the new version, then restart Home Assistant.
 
 ### Manual
 
-Copy `custom_components/lite_resources` into your `config/custom_components/` folder and restart Home Assistant.
+Download the source code of the newest [release](https://github.com/ColColonCleaner/ha-lite-resources/releases), and unpack it. Copy its folder `custom_components/lite_resources` into your `config/custom_components/` folder and restart Home Assistant.
 
-## Set up
+## Configuration
 
-Do each of these steps. The button is only a second way to do step 1.
+Follow these steps:
 
 1. Open the dialog that adds the integration, in one of two ways:
    - Open **Settings → Devices & services**, select **Add integration**, search for **Lite Resources**, and select it.
-   - Select this button: [![Open your Home Assistant instance and start setting up Lite Resources.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=lite_resources)
-2. The dialog has no settings, so select **Submit**. The dialog names the next step, and it does not show this list's steps.
-3. Open the integration's page: **Settings → Devices & services → Lite Resources**. The page shows the entry **Lite Resources**.
-4. Select **Add group**. It is in two places on that page: the button in the upper-right corner, and the three-dot menu (⋮) at the right of the entry **Lite Resources**.
+   - Select this button: [![Open your Home Assistant instance and start setting up this integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=lite_resources)
+2. The dialog has no settings, and its text names the next step. Select **Submit**, and close the dialog that confirms the new entry.
+3. Open **Settings → Devices & services → Lite Resources**. It shows the entry **Lite Resources**.
+4. Select **Add group**. It is in two places there: the button in the upper-right corner, and the three-dot menu (⋮) at the right of the entry **Lite Resources**.
 5. Fill in the form with the options in the table below, and select **Submit**. The group then shows as a row below the entry.
-6. Do steps 4 and 5 again for each other set of panels.
-7. Reload each panel's browser or app.
+6. Repeat steps 4 and 5 for each further set of devices.
+7. Reload the page on each device.
 
 <p align="center">
-  <img src="docs/images/integration-page.png" width="720" alt="The integration's page. Add group is the button in the upper-right corner and an item in the entry's three-dot menu. Each group is a row with a cog icon.">
-  <br><em>The integration's page with two groups. The entry's three-dot menu is open.</em>
+  <img src="docs/images/integration-page.png" width="720" alt="Settings, Devices & services, Lite Resources. Add group is the button in the upper-right corner and an item in the entry's three-dot menu. Each group is a row with a cog icon.">
+  <br><em>Settings → Devices & services → Lite Resources, with two groups. The entry's three-dot menu is open.</em>
 </p>
 
 | Option | What to choose |
 |---|---|
-| **Group name** | A name for the set of panels, such as *Workshop kiosks*. |
-| **Lite users** | The user(s) your panels log in as. Give each panel its own Home Assistant user if it doesn't have one. |
-| **Their dashboards** | Every dashboard those users open. |
-| **Always include** | Optional. Leave it empty, because the resources come from the dashboards. Add a resource only if a card fails to load (e.g. a mod your theme relies on). |
-| **Always exclude** | Resources to never load, even if a card seems to need them. Use this for an integration script with a generic name, such as `/dreame_vacuum/frontend.js`, that these dashboards don't use. It wins over *Always include*. |
-| **Include resources that can't be checked** | Resources served by integrations (e.g. `/browser_mod.js`, `/webrtc/...`) can't be read. On = load them (safe default). Off = skip them unless listed under *Always include*. A file whose name is a card these dashboards don't use, such as `dreame-vacuum-card.js`, is skipped either way. |
-| **Only send states their dashboards show** | On for a new group. It gives the biggest speed-up on slow devices. Turn it off when a panel must show entities that its dashboards do not name. |
-| **Extra entities** | Entities to keep streaming even though they aren't on the dashboards. |
+| **Group name** | A name for the set of devices, such as *Workshop kiosks*. |
+| **Lite users** | The users that the slow devices of this group log in as. Give each device a Home Assistant user of its own. |
+| **Their dashboards** | Every dashboard that those users open. |
+| **Only send states their dashboards show** | On for a new group. It gives the biggest speed-up on slow devices. Turn it off when a device must show entities that you cannot list under **Extra entities**, for example when its user searches all entities. |
+| **Extra entities** | Entities whose states the pages get although the dashboards do not name them. |
+| **Include resources that the integration cannot read** | This integration cannot read a resource that another integration or another site serves (e.g. `/browser_mod.js`, `/webrtc/...`). On = the integration sends such a resource (recommended). Off = it does not send one unless it is under **Always include**. With the option on or off, the integration does not send a resource whose file has the name of a card that these dashboards do not use, such as `dreame-vacuum-card.js`. |
+| **Always include** | Optional. Leave it empty, because the resources come from the dashboards. Add a resource only if a card fails to load, or if a theme needs a mod that no dashboard names. |
+| **Always exclude** | Optional. Leave it empty in most cases. The integration never sends a resource that is here, even if a card seems to need it. Use this for a resource that another integration serves under a generic name, such as `/dreame_vacuum/frontend.js`, and that these dashboards do not use. **Always exclude** wins over **Always include**. |
 
 ### Change, rename or delete a group
 
-Each group is a row below the entry **Lite Resources** on the integration's page.
+Under **Settings → Devices & services → Lite Resources**, each group is a row below the entry.
 
 - To change a group, select the cog icon (⚙) at the right of its row. The group's form opens. Change the options, and select **Submit**.
-- To rename a group, select the three-dot menu (⋮) at the right of its row, then **Rename**. The form's field **Group name** does the same.
+- To rename a group, select the three-dot menu (⋮) at the right of its row, then **Rename**. The form's option **Group name** does the same.
 - To delete a group, select the three-dot menu (⋮) at the right of its row, then **Delete**. Its users then get Home Assistant's normal behaviour.
 
-A change reaches the open panels at once. The integration needs no reload, and Home Assistant needs no restart.
+A change to the entities reaches the open pages immediately. A changed resource list reaches a page at its next page reload. The integration needs no reload, and Home Assistant needs no restart.
 
 ### Update from 0.2.x
 
-The update moves the users and the dashboards of a 0.2.x setup into one group named **Lite users**. On the integration's page, select the cog icon (⚙) at the right of that group, and give it a name. Then add the other groups with **Add group**. 0.2.x does not read the new configuration, so a return to 0.2.x needs the integration removed and added again.
+A manual install over version 0.2.x of the original keeps the configuration. An install through the Marketplace does not, because the uninstall of the original deletes the configuration. With the manual install, the update moves the users and the dashboards of the 0.2.x configuration into one group named **Lite users**. Under **Settings → Devices & services → Lite Resources**, select the cog icon (⚙) at the right of that group's row, and give the group a new name. Then add the other groups with **Add group**.
 
-### Check what a panel gets
+Version 0.2.x cannot read the new configuration. To return to 0.2.x, first delete the entry **Lite Resources** under **Settings → Devices & services**. Then install version 0.2.x and add the integration again.
 
-1. Open **Developer tools → Actions**.
-2. Enter `lite_resources.preview` in the field **Action**.
+### Check what a group's pages get
+
+1. Open **Settings → Tools → Actions**.
+2. Enter `lite_resources.preview` under **Action**.
 3. Select **Perform action**. The response shows below the button.
 
 Only an administrator can perform this action, because the response names each user and each entity in the dashboards.
 
-The response lists each group with its users. For each group it shows the resources that its users get and skip, and any `custom:` card types with no local resource. With state filtering on, it also shows the entities that they receive. More keys say what to look at:
+The response lists each group with its users. For each group it shows the resources that the group's pages get, the resources that they do not get, and each `custom:` card type for which the resource scan finds no resource file. When the group's option **Only send states their dashboards show** is on, it also shows the entities that the group's pages get. The response also holds these keys, which show what to check:
 
-- `states_not_narrowed` and `resources_not_reduced` give the reason when a group gets all states or the full resource list.
-- `guessed_types` holds each card type that no file registers in a way that the scan sees. For such a type, a file is sent when it meets two conditions: it names the type in quotes, and it holds a registration that the scan cannot read. If the card still fails to load, add its resource under *Always include*.
-- `excluded_without_element` holds each readable file in which the scan sees no element. Such a file is not sent. It is a file that works by a side effect, such as an icon set, or a card that the dashboards do not use. Add it under *Always include* when a panel needs it.
-- `state_entities_without_state` holds each name in the dashboards that has no state now. A state subscription holds those names too: an entity whose first state comes later, or a name with an error in a card.
+- `states_not_filtered` and `resources_not_filtered` give the reason when state filtering or resource filtering is off for a group.
+- `guessed_types` holds each card type that no resource file registers in a way that the resource scan can read. For such a type, the integration sends a resource when its file meets two conditions. The file names the type in quotes, and it holds a registration that the resource scan cannot read. If the card still fails to load, add its resource under **Always include**.
+- `excluded_without_element` holds each readable resource file in which the resource scan finds no card type. The integration does not send such a resource. Such a file either does its work with no card, as an icon set does, or it holds a card that the dashboards do not use, with a registration that the resource scan cannot read. Add the resource under **Always include** when a page needs it.
+- `state_entities_without_state` holds each entity ID in the dashboards that has no state now. State filtering keeps those entity IDs, so a page gets each state when it comes. Such an entity ID belongs to an entity whose first state comes later, or it is a typing error in a card.
+- `open_pages_with_filtered_states` holds the number of open pages that have state filtering now.
 
 ## FAQ
 
-**Why isn't this built into Home Assistant?**
-Home Assistant's frontend is designed so any screen can show anything instantly - search, more-info dialogs and templates can reach every entity without asking first. That's the right default for phones and desktops. Lite Resources is an opt-in trade-off for screens that only ever show one dashboard.
+**Why is this not built into Home Assistant?**
+The Home Assistant project designs the frontend so that any device can show anything instantly. Search, more-info dialogs and templates can reach every entity without asking first. That is the right default for phones and desktops. This integration is an opt-in trade-off for devices that only ever show one dashboard.
 
 **Does it filter per device or per user?**
-Per user. If you log in as a lite user on your phone, you get the lite behaviour there too - so give panels their own user.
+Per user. If you log in as a lite user on your phone, you get only the resources and the states of that user's group there too. So give each slow device a user of its own.
 
-**Can two sets of panels have different dashboards?**
+**Can two sets of devices have different dashboards?**
 Yes. Add one group for each set. Each group gets the resources and the states for its own dashboards.
 
-**Something shows "unavailable" or a card fails to load on the panel.**
-With state filtering on, entities not on the panel's dashboards aren't sent - add them under *Extra entities*, or add the dashboard. For a card that fails to load, run `lite_resources.preview` and add its resource under *Always include*. To stop a resource the panel never uses, add it under *Always exclude*.
+**Something shows "unavailable" or a card fails to load on the device.**
+With state filtering on, the integration does not send the states of entities that are not on the device's dashboards. Add them under **Extra entities**. If they are on a dashboard that the group does not hold, add that dashboard under **Their dashboards**. For a card that fails to load, perform `lite_resources.preview`, find the card type in the response, and add its resource under **Always include**. To keep a resource from a device that never uses it, add it under **Always exclude**.
 
 **Does it affect voice assistants, automations, history or the companion app's sensors?**
-No. Only the dashboard's resource list and the live state subscription are changed, and only for lite users. The integration knows a connection's user and not its program. So each program that signs in as a lite user and asks for all states gets only the entities on the dashboards. Give each panel a user of its own, and use that user for nothing else.
+No, as long as nothing but the device logs in as its lite user. The integration changes only the list of dashboard resources and the live state subscription, and only for lite users. The integration knows the user of a connection, but not the program that opened it. So another program that logs in as a lite user and asks for all states also gets only the entities on the group's dashboards. Give each device a user of its own, and use that user for nothing else.
 
 **An administrator is a lite user. What changes?**
-The page **Settings → Dashboards → Resources** reads the same resource list, so it shows only the group's resources. Use another user to manage the resources.
+**Settings → Dashboards → Resources** then shows only the resources of the group, because it reads the filtered list of dashboard resources. Use another user to manage the resources.
 
 **What happens if something goes wrong?**
-If the work on the trimmed list fails with an error, or takes longer than 30 seconds, Lite Resources sends the full list and logs the reason. If the entity scan fails, a panel that connects gets all states, and an open panel keeps its entities. The section *When a group's states are not narrowed* says what comes next.
+The resource scan can fail with an error, or take longer than 30 seconds. The integration then sends the full resource list and writes the reason to the log. If the entity scan fails, a page that connects gets all states, and an open page keeps its entities. See [When state filtering is off for a group](#when-state-filtering-is-off-for-a-group) for what comes next.
 
-Some gaps give no error. A card type that no file seems to provide is in the log one time, and `lite_resources.preview` shows it. A resource can work by a side effect, such as an icon set or a mod that only a theme uses. Lite Resources does not send such a resource until you add it under *Always include*.
+Some gaps give no error. A card type that no resource file seems to register appears in the log once, and `lite_resources.preview` shows it. A resource such as an icon set, or a mod that only a theme uses, has no card type in a dashboard. The integration does not send such a resource until you add it under **Always include**.
 
 ## Contributing
 
 Issues and pull requests are welcome. Please include your Home Assistant version and the output of `lite_resources.preview`.
 
-Before each commit, run each validation with one command:
+Before each commit, run the full validation with one command:
 
 ```bash
 python scripts/validate.py
 ```
 
-The script runs the unit tests, the static checks, both type checks and hassfest, and it has no option that leaves a check out. It exits with 1 when a check fails or cannot run. The comment at the top of [scripts/validate.py](scripts/validate.py) names the two environment variables that it reads.
+The script runs the unit tests, the static checks, two type checks and hassfest, and it has no option that skips a check. It exits with 1 when a check fails or cannot run. The comment at the top of [scripts/validate.py](scripts/validate.py) names the two environment variables that the script reads.
 
-hassfest is Home Assistant's own validation of an integration's manifest, translations and services. It has no release as a package, so the script runs the container image of the GitHub action `home-assistant/actions/hassfest`, on this machine or on a host that it reaches with `ssh`. The image is named by its digest, and the container gets no network and no volume. The script also fails for a warning of hassfest, which hassfest itself lets pass.
+hassfest is the tool that the Home Assistant project uses to validate an integration's manifest, translations and services. The project does not release it as a package. So the script runs the container image of the GitHub action `home-assistant/actions/hassfest` with Docker, on your machine or on a host that the script reaches with `ssh`. The script names the image by its digest, and the container gets no network and no volume. The script also fails for a hassfest warning, which hassfest itself lets pass.
 
-To make git refuse a commit that fails a check, add a `pre-commit` hook to your clone that runs `python scripts/validate.py --tree-is-the-commit`. With that option, the script first refuses a working tree that holds more than the commit.
+To make git refuse a commit that fails a check, add a `pre-commit` hook to your clone that runs `python scripts/validate.py --tree-is-the-commit`. With that option, the script first compares the working tree with the staged changes. This check fails when a tracked file holds a change that is not staged, or when a file is untracked. The other checks read the working tree, so they check the commit only when the two are the same.
 
-The HACS action reads the repository on GitHub, so it has no local run. The unit tests cover its three checks of files: the brand icon, `hacs.json` and this README.
+The Validate workflow also runs the HACS action, with which the HACS project validates a custom repository. That action reads the repository on GitHub, so it cannot run locally. The unit tests cover the three files that it checks: the brand icon, `hacs.json` and this README.
 
-These are the checks of the script apart from hassfest, as single commands from the root of the repository:
+These commands run the script's checks one at a time from the root of the repository, apart from hassfest and the second type check:
 
 ```bash
 python -m unittest discover -s tests
@@ -281,9 +292,9 @@ ruff format --check .
 mypy
 ```
 
-The tests need Python 3.12 or later and the package `voluptuous`. They run against stand-ins, so they need no Home Assistant installation. The static checks and the format check need ruff 0.17.5, and the type checks need mypy 2.4.1. Those are the versions that the Validate workflow installs. `ruff.toml` and `mypy.ini` hold the settings. To give changed code the format, run `ruff format .`.
+The tests need Python 3.12 or later and the package `voluptuous`. They run against stand-ins, so they need no Home Assistant installation. The static checks and the format check need ruff 0.17.5, and the type checks need mypy 2.4.1. Those are the versions that the Validate workflow installs. `ruff.toml` and `mypy.ini` hold the settings. To format changed code, run `ruff format .`.
 
-The command `mypy` reads no Home Assistant, so its result is the same on each machine. It checks the calls inside the integration, and each name from Home Assistant has the type `Any` there. A second type check reads the types of Home Assistant from the source of its core. It needs a clone of that source at the tag of your Home Assistant version, and it runs nothing of it:
+The command `mypy` does not read Home Assistant, so its result is the same on every machine. It checks the calls inside the integration, and each name from Home Assistant has the type `Any` there. A second type check reads the types of Home Assistant from the source of its core. It needs a clone of that source at the tag of your Home Assistant version, and it runs no code from that clone:
 
 ```bash
 git clone --depth 1 --branch 2026.11.3 https://github.com/home-assistant/core ../home-assistant-core
@@ -292,11 +303,41 @@ MYPYPATH=../home-assistant-core mypy --config-file mypy-homeassistant.ini
 
 On Windows, set `MYPYPATH` with your shell's syntax. The Validate workflow runs both type checks.
 
+### One word for one thing
+
+This repository uses one word for one thing in each of its texts: this README, the changelog, the forms, the log and the comments. A second word for the same thing makes a reader ask if it is a second thing.
+
+| The thing | Its word | Not for this thing |
+|---|---|---|
+| The hardware that shows a dashboard, such as a wall panel or a tablet | **device** | panel, screen, display |
+| One browser tab or app window that shows Home Assistant, with its own connection | **page** | panel, device, client |
+| A place in Home Assistant's settings, such as **Settings → Devices & services** | its path | page |
+| A choice in a group's form | **option** | field |
+| The name after `type:` in a card, such as `custom:mushroom-light-card` | **card type** | card name, element |
+| An entity that holds other entities, such as a light group | **entity group** | group of entities |
+| The browser loads the page again | **page reload** | refresh |
+| Home Assistant loads the integration again | **reload of the integration** | restart |
+| A user in a group | **lite user**, and a device **logs in** as that user | sign in |
+| An entry of Home Assistant's list of dashboard resources | **resource**, and its file is the **resource file** | card file, script |
+| The integration reads a group's dashboards to find the entities that they show | **entity scan** | scan alone |
+| The integration reads a group's dashboards and resource files to find the resources that the dashboards use | **resource scan** | scan alone |
+| The integration sends a page only the states of its group's entities | **state filtering** | narrow, limit |
+| The integration sends a page only its group's resources | **resource filtering** | reduce, trim |
+| This integration, as the thing that acts | **this integration**, or `ha-lite-resources` | its display name, which stands only where a step names what Home Assistant shows |
+| A defect | **fault**, and a change **corrects** it | issue, bug |
+| An entry of the issue list on GitHub | **issue** | |
+| The repository `evski/ha-lite-resources` | **the original** | upstream |
+| Home Assistant sets the integration up | the integration's **setup** | start |
+| What the user entered for the integration | **configuration** | setup |
+| The checks before a commit | **validation**, with a **check** as one part of it | |
+
+`scan` and `log` are nouns only. A word that does not explain itself gets a few words that say what it is, at its first use in a section.
+
 ## Releasing
 
-Each version has a release on GitHub. Its tag is `v` plus the manifest's version, such as `v0.3.9`. Home Assistant shows that tag as the integration's version, and it shows a commit hash for a repository with no release.
+Each version has a release on GitHub. Its tag is `v` plus the manifest's version, such as `v0.3.9`. Home Assistant shows that tag as the integration's version. For a repository with no release, Home Assistant shows a commit hash.
 
-1. Set `version` in `custom_components/lite_resources/manifest.json` to the new version. Give `CHANGELOG.md` an entry for that version, and leave its section `Unreleased` empty. Add each new feature, and each corrected fault of the original, to the section [What this fork changes](#what-this-fork-changes). A fault that this fork made is not for that section.
+1. Set `version` in `custom_components/lite_resources/manifest.json` to the new version. Give `CHANGELOG.md` an entry for that version, and leave its section `Unreleased` empty. Add each new feature, and each correction to the original, to the section [What this fork changes](#what-this-fork-changes).
 2. Run `python scripts/validate.py`. When each check passes, commit, and push the commit to `main`.
 3. Run `python scripts/release_notes.py` with the tag, such as `python scripts/release_notes.py v0.3.9`. It prints the notes of the release, or it says why the tag is wrong.
 4. Make the tag on that commit, and push it:
@@ -306,9 +347,9 @@ git tag v0.3.9
 git push origin v0.3.9
 ```
 
-The workflow `Release` then runs the same script on GitHub and makes the release, with the changelog entry of the version as its notes. A tag that the script refuses gets no release.
+The workflow `Release` then runs `scripts/release_notes.py` on GitHub and makes the release, with the changelog entry of the version as its notes. A tag that the script refuses gets no release.
 
-If a run fails, correct its cause on `main`. Then start the workflow `Release` by hand in the `Actions` tab, and give it the tag. In a fork, GitHub runs no workflow until the fork's owner enables GitHub Actions in the `Actions` tab.
+If a run fails for a cause in the workflow, correct the workflow on `main`. Then start the workflow `Release` by hand in the `Actions` tab, and give it the tag. For a cause in the tagged commit, make a new version. In your own fork of this repository, GitHub runs no workflow until you enable GitHub Actions in the `Actions` tab.
 
 Never move a tag that has a release, because Home Assistant installs by the tag. For a correction, make a new version.
 

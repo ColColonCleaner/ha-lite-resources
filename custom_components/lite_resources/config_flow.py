@@ -1,4 +1,4 @@
-"""Config flow for Lite Resources, and the subentry flow for its groups of lite users."""
+"""The integration's config flow, and the subentry flow for its groups of lite users."""
 
 from __future__ import annotations
 
@@ -74,8 +74,8 @@ async def _async_group_schema(
 ) -> vol.Schema:
     """Return one group's form, with `current` as the values that it shows.
 
-    A new group's state filter is on. A stored group with no such value does not
-    narrow the states, so its form shows the filter as off.
+    State filtering is on for a new group. A stored group with no such value does not
+    filter the states, so its form shows state filtering as off.
     """
     all_users = [u for u in await hass.auth.async_get_users() if not u.system_generated]
     users = [
@@ -147,14 +147,14 @@ async def _async_group_schema(
 
 
 class LiteResourcesConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Set up Lite Resources (single instance). The groups are added afterwards."""
+    """Set up this integration (single instance). The groups are added afterwards."""
 
     VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Confirm the setup. The entry itself holds no settings."""
+        """Confirm the setup. The entry itself holds no configuration."""
         if user_input is not None:
             return self.async_create_entry(title="Lite Resources", data={})
         return self.async_show_form(step_id="user")
@@ -218,7 +218,8 @@ class GroupSubentryFlow(ConfigSubentryFlow):
             if not errors:
                 data = dict(user_input)
                 name = str(data.pop(CONF_NAME)).strip()
-                # The entry's update listener gives the open pages the new settings.
+                # The entry's update listener brings each open page in step with the
+                # changed group.
                 return self.async_update_and_abort(
                     entry, subentry, title=name, data=data
                 )

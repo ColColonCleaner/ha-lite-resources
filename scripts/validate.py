@@ -1,4 +1,4 @@
-"""Run each validation of this repository with one command.
+"""Run the full validation of this repository with one command.
 
     python scripts/validate.py
 
@@ -22,7 +22,7 @@ hassfest is the validation of Home Assistant for an integration's manifest, tran
 services and other files. It has no release as a package, so the script runs the container
 image that the GitHub action home-assistant/actions/hassfest runs. The image is named by
 its digest, and the container gets no network and no volume: the files of
-custom_components reach it as a tar stream on its standard input. Pull the image one time
+custom_components reach it as a tar stream on its standard input. Pull the image once
 on the Docker host before the first run:
 
     docker pull <the value of HASSFEST_IMAGE below>

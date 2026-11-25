@@ -39,7 +39,7 @@ GROUP_KEYS = (
     CONF_EXTRA_ENTITIES,
 )
 
-# The key for the removal list in an entity event of the subscribe_entities stream, as
+# The key for the removal list in an entity event of a state subscription, as
 # homeassistant.components.websocket_api.messages.ENTITY_EVENT_REMOVE defines it.
 ENTITY_EVENT_REMOVE = "r"
 
@@ -76,7 +76,7 @@ class Group:
 
     @property
     def filter_states(self) -> bool:
-        """True when the group's state stream is narrowed to its dashboards."""
+        """True when state filtering is on for the group."""
         return bool(self.options.get(CONF_FILTER_STATES))
 
 
@@ -142,8 +142,8 @@ def users_in_other_groups(
 def legacy_group_data(options: Mapping[str, Any]) -> dict[str, Any] | None:
     """Return the data for one group, taken from the options of a single-group version.
 
-    Versions up to 0.2.1 kept one set of users and dashboards in the config entry's
-    options. None means that those options name no user, so no group results.
+    Versions up to 0.2.1 kept the users and the dashboards of one group in the config
+    entry's options. None means that those options name no user, so no group results.
     """
     if not options.get(CONF_USERS):
         return None
@@ -151,13 +151,13 @@ def legacy_group_data(options: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
-    """Return each state subscription for all entities, as (connection, subscription ID).
+    """Return each subscription to all states, as (connection, subscription ID).
 
     Home Assistant keeps no list of its websocket connections. Its subscribe_entities
     handler puts a listener for state changes on the event bus: a partial of the function
     CORE_FORWARD_FUNCTION with the arguments (send_message, entity_ids, entity_filter,
     user, message ID as bytes). `send_message` is a method of the connection, and
-    `entity_ids` and `entity_filter` are None for a subscription to all entities.
+    `entity_ids` and `entity_filter` are None for a subscription to all states.
 
     This reads internals of Home Assistant: the listener list of the event bus, and that
     partial. An item with another layout is left out, so a later Home Assistant version
@@ -168,7 +168,7 @@ def unfiltered_state_subscriptions(bus: Any) -> list[tuple[Any, int]]:
 
 
 def search_state_subscriptions(bus: Any) -> tuple[list[tuple[Any, int]], int]:
-    """Return the state subscriptions for all entities, and a count of unreadable listeners.
+    """Return the subscriptions to all states, and a count of unreadable listeners.
 
     The first value is that of unfiltered_state_subscriptions. The second value counts the
     listeners of the function CORE_FORWARD_FUNCTION whose arguments do not have the layout
@@ -250,7 +250,7 @@ class _QuietConnection:
 
 @dataclass
 class _Live:
-    """One narrowed subscribe_entities subscription that an open page holds."""
+    """One filtered state subscription that an open page holds."""
 
     connection: Any
     msg: dict[str, Any]
@@ -258,7 +258,7 @@ class _Live:
 
 
 class LiveSubscriptions:
-    """The narrowed state subscriptions of the pages that are open now.
+    """The filtered state subscriptions of the pages that are open now.
 
     `subscribe(connection, msg)` runs Home Assistant's subscribe_entities handler. That
     handler stores the function that ends its state listener in
@@ -295,9 +295,9 @@ class LiveSubscriptions:
         self._track(_Live(connection, dict(msg), wanted))
 
     def update(self, live: _Live, entities: Iterable[str] | None) -> bool:
-        """Give a live subscription a new entity set. None gives the page all entities.
+        """Give a live subscription a new entity set. None stands for all states.
 
-        The page keeps its subscription ID. It receives the states of the new set, and a
+        The page keeps its subscription ID. It gets the states of the new set, and a
         removal for each entity that left the set. Returns False when the set is unchanged,
         and when the handler fails. After a failure the page keeps its earlier set.
         """
@@ -318,7 +318,7 @@ class LiveSubscriptions:
         if wanted is None:
             return True
         # The page is in the table before the removal goes out, so a failure of that
-        # message leaves no narrowed listener that the table does not know.
+        # message leaves no filtered listener that the table does not know.
         self._track(_Live(live.connection, live.msg, wanted))
         removed = live.entities - wanted
         if removed:
@@ -338,14 +338,14 @@ class LiveSubscriptions:
         held: Iterable[str],
         entities: Iterable[str],
     ) -> bool:
-        """Narrow a subscription for all entities that this object did not make.
+        """Filter a subscription to all states that this object did not make.
 
         A page makes such a subscription when Home Assistant's handler answers it, before
-        this integration is set up. `held` is each entity that the page can hold now. The
-        page keeps its subscription ID. It receives the states of `entities`, and a
+        this integration's setup. `held` is each entity that the page can hold now. The
+        page keeps its subscription ID. It gets the states of `entities`, and a
         removal for each other entity in `held`. Returns False when the page has no
         subscription with this ID, and when the handler fails. After a failure the page
-        keeps its subscription for all entities.
+        keeps its subscription to all states.
         """
         key = (id(connection), msg_id)
         if key in self._live or msg_id not in connection.subscriptions:
@@ -356,7 +356,7 @@ class LiveSubscriptions:
             try:
                 # The schema adds the keys "include" and "exclude", which the handler reads.
                 msg = dict(self._validate(msg))
-            except Exception:  # the page keeps its subscription for all entities
+            except Exception:  # the page keeps its subscription to all states
                 _LOGGER.exception(
                     "The schema of %s refused an adoption's message. The page keeps "
                     "all states",
@@ -382,10 +382,11 @@ class LiveSubscriptions:
     ) -> bool:
         """Put a new state listener in the place of a subscription's listener.
 
-        `wanted` is the new listener's entity set, and None gives all entities. The new
-        listener starts before the old one ends, and no state change can occur between the
-        two steps, because nothing here waits. So the page loses no state change, and the
-        handler's failure leaves the old listener in its place. Returns False then.
+        `wanted` is the new listener's entity set, and None stands for all states. The
+        new listener starts before the old one ends, and no state change can occur
+        between the two steps, because nothing here waits. So the page loses no state
+        change, and the handler's failure leaves the old listener in its place. Returns
+        False then.
         """
         msg_id = msg["id"]
         old = connection.subscriptions.get(msg_id)

@@ -1,4 +1,4 @@
-"""Resources that the file scan did not see, and files that it could not read.
+"""Resources that the resource scan did not find, and files that it could not read.
 
 Each case comes from a review finding on the resource scan.
 """
@@ -16,7 +16,8 @@ FileCache = _resolver.FileCache
 names_in_javascript = _resolver.names_in_javascript
 
 # A bundle that registers its elements only through the minified decorator of Lit. The
-# scan sees the element that the file name gives, and it does not see the second element.
+# resource scan finds the element that the file name gives, and it does not find the
+# second element.
 LAYOUT_CARD_JS = b"""
 const t=t=>(e,o)=>{void 0!==o?o.addInitializer(()=>{customElements.define(t,e)}):customElements.define(t,e)};
 let Grid=class extends s{};Grid=e([t("grid-layout")],Grid);
@@ -70,7 +71,8 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/hacsfiles/helper-row/helper-row.js", summary["excluded"])
 
     async def test_guess_takes_each_file_that_can_hide_a_registration(self) -> None:
-        # A second bundle with a registration that the scan cannot read names the type.
+        # A second bundle with a registration that the resource scan cannot read names
+        # the type.
         _write(
             self.root,
             "other-kit/other-kit.js",
@@ -149,8 +151,9 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
             }
         )
         summary = await self._resolve({"type": "tile", "entity": "light.hall"})
-        # Each readable file in which the scan sees no element is listed, whatever its
-        # name is: an icon set, and a card that registers through a decorator.
+        # Each readable file in which the resource scan finds no element is listed,
+        # whatever its name is: an icon set, and a card that registers through a
+        # decorator.
         self.assertEqual(
             sorted(summary["excluded_without_element"]),
             [
@@ -200,8 +203,8 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
     async def test_dashboard_that_cannot_be_loaded_is_left_out_of_the_resources(
         self,
     ) -> None:
-        # The browser shows no card of such a dashboard, so the list needs none of its
-        # resources. The log names the dashboard one time for each error text.
+        # The browser shows no card of such a dashboard, so the resource list needs none
+        # of its resources. The log names the dashboard once for each error text.
         broken = _Dashboard(None, fail=True)
         dashboards = {"d": _dashboard({"type": "custom:layout-card"}), "yaml": broken}
         hass = _Hass(self.root, dashboards, self.resources)
@@ -283,7 +286,10 @@ class ResourceScanTest(unittest.IsolatedAsyncioTestCase):
 
 
 class FileReadTest(unittest.TestCase):
-    """A file that the scan cannot read counts as unreadable, and raises nothing."""
+    """A file that the resource scan cannot read counts as unreadable.
+
+    The read raises nothing.
+    """
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

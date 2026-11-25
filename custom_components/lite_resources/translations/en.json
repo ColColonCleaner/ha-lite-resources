@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "Lite Resources",
-        "description": "Set up Lite Resources. After this step, open the integration's page: Settings, Devices & services, Lite Resources. There, select **Add group** in the upper-right corner, or in the entry's three-dot menu. Add one group for each set of users (for example the logins of one room's wall panels). Each group has its own dashboards. Everyone outside the groups keeps the normal behaviour."
+        "description": "Set up this integration. After this step, open Settings, Devices & services, Lite Resources. There, select **Add group** in the upper-right corner, or in the entry's three-dot menu. Add one group for each set of devices. A group holds the users that those devices log in as, for example the users of one room's wall panels. Each group has its own dashboards. Everyone outside the groups keeps Home Assistant's normal behaviour."
       }
     },
     "abort": {
-      "single_instance_allowed": "Lite Resources is already set up."
+      "single_instance_allowed": "This integration is already set up."
     }
   },
   "config_subentries": {
@@ -20,50 +20,50 @@
       "step": {
         "user": {
           "title": "Add a group of lite users",
-          "description": "A group's users load only the custom cards their dashboards use, and can receive live updates only for the entities on those dashboards. Both are worked out from the dashboards, and follow a dashboard when it is changed.",
+          "description": "The pages of a group's users load only the resources that the group's dashboards use. They can also get states only for the entities on those dashboards. The integration finds both from the dashboards, and it finds them again when you save a dashboard.",
           "data": {
             "name": "Group name",
             "users": "Lite users",
             "dashboards": "Their dashboards",
             "filter_states": "Only send states their dashboards show",
             "extra_entities": "Extra entities",
-            "include_unscannable": "Include resources that can't be checked",
+            "include_unscannable": "Include resources that the integration cannot read",
             "always_include": "Always include (optional)",
             "always_exclude": "Always exclude (optional)"
           },
           "data_description": {
             "name": "For example 'Workshop kiosks'.",
-            "users": "These users get the reduced resource list and state stream on every device they log in on. A user can be in one group only.",
-            "dashboards": "Every dashboard that the users in this group open. The resources and the entities on these dashboards are found automatically.",
-            "filter_states": "Stream live updates only for entities on their dashboards (plus group members). Big CPU saving on slow panels; other entities show as unavailable for these users.",
-            "extra_entities": "Entities to keep streaming even though they aren't on the dashboards.",
-            "include_unscannable": "Resources served by integrations or other sites can't be read; keep them loaded (recommended). A file named after a card these dashboards don't use is still skipped.",
-            "always_include": "Leave empty: the needed resources are found from the dashboards. Add a resource only if a card fails to load, e.g. a mod used by a theme.",
-            "always_exclude": "Leave empty normally. Resources to never load, even if a card seems to need them or they can't be checked. Wins over Always include."
+            "users": "These users get only the resources that their dashboards use and the states that their dashboards show, on each device that logs in as one of them. A user can be in one group only.",
+            "dashboards": "Each dashboard that this group's users open. The integration finds the resources and the entities of these dashboards by itself.",
+            "filter_states": "Send states only for the entities on their dashboards, for the members of each entity group on those dashboards, such as a light group, and for the entities under Extra entities. This saves a slow device much work. Each other entity shows as unavailable for these users.",
+            "extra_entities": "Entities whose states these users also get, although the dashboards do not name them.",
+            "include_unscannable": "This integration cannot read a resource that another integration or another site serves. On: the integration sends such a resource (recommended). Off: it does not send one unless it is under Always include. With the option on or off, it does not send a resource whose file has the name of a card that these dashboards do not use.",
+            "always_include": "Leave this empty, because the integration finds the resources from the dashboards. Add a resource only if a card fails to load, or if a theme needs a mod that no dashboard names.",
+            "always_exclude": "Leave this empty in most cases. The integration never sends a resource that is here, even when a card seems to need it or when the integration cannot read it. This option wins over Always include."
           }
         },
         "reconfigure": {
           "title": "Change a group of lite users",
-          "description": "The open pages of this group's users get the new entities at once. A page loads other custom cards when it is loaded again. To rename or delete the group, use the three-dot menu at the right of its row on the integration's page.",
+          "description": "The open pages of this group's users get the states of the new entities immediately. A page gets a changed resource list at its next page reload. To rename or delete the group, use the three-dot menu at the right of its row.",
           "data": {
             "name": "Group name",
             "users": "Lite users",
             "dashboards": "Their dashboards",
             "filter_states": "Only send states their dashboards show",
             "extra_entities": "Extra entities",
-            "include_unscannable": "Include resources that can't be checked",
+            "include_unscannable": "Include resources that the integration cannot read",
             "always_include": "Always include (optional)",
             "always_exclude": "Always exclude (optional)"
           },
           "data_description": {
             "name": "For example 'Workshop kiosks'.",
-            "users": "These users get the reduced resource list and state stream on every device they log in on. A user can be in one group only.",
-            "dashboards": "Every dashboard that the users in this group open. The resources and the entities on these dashboards are found automatically.",
-            "filter_states": "Stream live updates only for entities on their dashboards (plus group members). Big CPU saving on slow panels; other entities show as unavailable for these users.",
-            "extra_entities": "Entities to keep streaming even though they aren't on the dashboards.",
-            "include_unscannable": "Resources served by integrations or other sites can't be read; keep them loaded (recommended). A file named after a card these dashboards don't use is still skipped.",
-            "always_include": "Leave empty: the needed resources are found from the dashboards. Add a resource only if a card fails to load, e.g. a mod used by a theme.",
-            "always_exclude": "Leave empty normally. Resources to never load, even if a card seems to need them or they can't be checked. Wins over Always include."
+            "users": "These users get only the resources that their dashboards use and the states that their dashboards show, on each device that logs in as one of them. A user can be in one group only.",
+            "dashboards": "Each dashboard that this group's users open. The integration finds the resources and the entities of these dashboards by itself.",
+            "filter_states": "Send states only for the entities on their dashboards, for the members of each entity group on those dashboards, such as a light group, and for the entities under Extra entities. This saves a slow device much work. Each other entity shows as unavailable for these users.",
+            "extra_entities": "Entities whose states these users also get, although the dashboards do not name them.",
+            "include_unscannable": "This integration cannot read a resource that another integration or another site serves. On: the integration sends such a resource (recommended). Off: it does not send one unless it is under Always include. With the option on or off, it does not send a resource whose file has the name of a card that these dashboards do not use.",
+            "always_include": "Leave this empty, because the integration finds the resources from the dashboards. Add a resource only if a card fails to load, or if a theme needs a mod that no dashboard names.",
+            "always_exclude": "Leave this empty in most cases. The integration never sends a resource that is here, even when a card seems to need it or when the integration cannot read it. This option wins over Always include."
           }
         }
       },
@@ -78,7 +78,7 @@
   "services": {
     "preview": {
       "name": "Preview",
-      "description": "For administrators. Show, for each group, which resources its users get and which are skipped, any card types no local resource was found for, and (if state filtering is on) which entities they receive. It also says why a group's states or resources are not narrowed."
+      "description": "For administrators. For each group, this action shows the resources that the group's pages get and those that they do not get. It shows each card type for which the resource scan finds no resource file. When state filtering is on for a group, it also shows the entities that the group's pages get. It also gives the reason when state filtering or resource filtering is off for a group."
     }
   }
 }

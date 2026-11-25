@@ -1,9 +1,9 @@
-"""A YAML dashboard whose file changes, with the real dashboard scan.
+"""A YAML dashboard whose file changes, with the real entity scan.
 
 Home Assistant fires the update event of a YAML dashboard inside the load that finds the
-changed file. When that load is a scan of this integration, each open page of each group
-with the dashboard still needs the new entities. A file that fires at each load must start
-no update with no end.
+changed file. When an entity scan or a resource scan of this integration makes that
+load, each open page of each group with the dashboard still needs the new entities. A
+file that fires at each load must start no update with no end.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ class _YamlDashboard:
         self.loads += 1
         fired = False
         error: Exception | None = None
-        # The read of the file, in the executor: it replaces the cache at once.
+        # The read of the file, in the executor: it replaces the cache immediately.
         if self.file_is_newer or self.always:
             if isinstance(self.file, Exception):
                 error = self.file
@@ -87,7 +87,7 @@ class _YamlDashboard:
 
 
 def _hass() -> _Hass:
-    """The stand-in for hass, with what the real scan reads."""
+    """The stand-in for hass, with what the real entity scan reads."""
     hass = _Hass()
     states = {
         entity_id: SimpleNamespace(
@@ -111,7 +111,7 @@ def _hass() -> _Hass:
 
 
 class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
-    """Two groups show one YAML dashboard. A kiosk and the tablet have an open page."""
+    """Two groups show one YAML dashboard. A device of each group has an open page."""
 
     url_path: str | None = "yaml-dash"
     dashboard_key = "yaml-dash"
@@ -194,12 +194,14 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
         await self.dashboard.async_load(False)
         await self.hass.drain()
         self._assert_each_open_page_has_the_new_entity()
-        # The browser's load, and one scan for each of the two groups. The scan sees
-        # the configuration that the event announced, so no second update follows.
+        # The browser's load, and one entity scan for each of the two groups. Each
+        # entity scan loads the configuration that the event announced, so no second
+        # update follows.
         self.assertEqual(self.dashboard.loads - loads, 3)
 
     async def test_event_of_another_task_during_a_scan_is_not_dropped(self) -> None:
-        # A new page's scan waits in its load. Another task then finds the changed file.
+        # A new page's entity scan waits in its load. Another task then finds the
+        # changed file.
         late = _Connection("u-w2")
         _subscribe(self.hass, late, 9)
         self.dashboard.write(_cards("sensor.old", "sensor.new"))
@@ -278,7 +280,7 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self._ids("u-w2"))
         self.assertEqual(self._ids("u-w1"), OLD)
         self.assertEqual(self._ids("u-k"), OLD)
-        # The operator corrects the file. A later try finds it, and each page of each
+        # An administrator corrects the file. A retry finds it, and each page of each
         # group gets the entities of the corrected file.
         self.dashboard.write(_cards("sensor.old", "sensor.new"))
         await asyncio.sleep(0.2)
@@ -294,11 +296,11 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.1)
             await self.hass.drain()
         self.assertIsNone(self._ids("u-w2"))
-        # The operator puts the file back as it was, and looks at the preview.
+        # An administrator puts the file back as it was, and looks at the preview.
         self.dashboard.write(_cards("sensor.old"))
         answer = await self._preview()
         self.assertEqual(answer["groups"][0]["state_entities"], OLD)
-        # The preview's load found the file, so the page with all states is narrowed.
+        # The preview's load found the file, so the page with all states is filtered.
         self.assertEqual(self._ids("u-w2"), OLD)
         self.assertEqual(self._ids("u-w1"), OLD)
 
@@ -310,8 +312,9 @@ class YamlDashboardTest(unittest.IsolatedAsyncioTestCase):
             await self._open("u-w2", 9)
             await asyncio.sleep(0.1)
             await self.hass.drain()
-        # The scan of the new page, and one scan for each later try of its group. The
-        # kitchen group has no scan, because its page keeps its entities.
+        # The entity scan of the new page, and one entity scan for each retry of its
+        # group. The kitchen group has no entity scan, because its page keeps its
+        # entities.
         self.assertEqual(self.dashboard.loads - loads, 1 + _entry.UPDATE_RETRIES)
         await asyncio.sleep(0.05)
         await self.hass.drain()
@@ -364,8 +367,9 @@ class TwoYamlDashboardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._ids("u-w2"), both)
         self.assertEqual(self._ids("u-w1"), both)
         self.assertEqual(self._ids("u-k"), ["sensor.new", "sensor.old", *OLD[1:]])
-        # The scan of the new page loads each dashboard one time. The one update after
-        # it scans each of the two groups one time, and no further update follows.
+        # The entity scan of the new page loads each dashboard once. The one update
+        # after it runs one entity scan for each of the two groups, and no further
+        # update follows.
         self.assertEqual(self.first.loads - loads[0], 2)
         self.assertEqual(self.second.loads - loads[1], 3)
 
@@ -374,7 +378,7 @@ class _StoredDashboard:
     """Stand-in for LovelaceStorage, the dashboard that the UI stores.
 
     As in Home Assistant, a save keeps the new configuration as a new object and fires
-    the update event at once, and a load gives the object of the last save. A delete
+    the update event immediately, and a load gives the object of the last save. A delete
     leaves no stored configuration, and it fires the same event.
     """
 
@@ -397,7 +401,7 @@ class _StoredDashboard:
 
 
 class StoredDashboardTest(unittest.IsolatedAsyncioTestCase):
-    """Two groups show one stored dashboard. A kiosk and the tablet have an open page."""
+    """Two groups show one stored dashboard. A device of each group has an open page."""
 
     _open = YamlDashboardTest._open
     _ids = YamlDashboardTest._ids
@@ -430,7 +434,8 @@ class StoredDashboardTest(unittest.IsolatedAsyncioTestCase):
         await self.hass.drain()
         for user_id in ("u-w1", "u-k"):
             self.assertIn("sensor.new", self._ids(user_id), user_id)
-        # The event starts one update, which scans each of the two groups one time.
+        # The event starts one update, which runs one entity scan for each of the two
+        # groups.
         self.assertEqual(self.dashboard.loads - loads, 2)
 
     async def test_delete_gives_each_group_one_scan(self) -> None:

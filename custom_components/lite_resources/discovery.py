@@ -1,8 +1,9 @@
 """Entities that a card finds by itself.
 
-A dashboard names most of its entities, and the resolver finds those in the dashboard's
-text. Some cards name an area or an integration instead, and find their entities in Home
-Assistant's registries. A user with a narrowed state stream needs those entities too.
+A dashboard names most of its entities, and the entity scan finds those in the
+dashboard's text. Some cards name an area or an integration instead, and find their
+entities in Home Assistant's registries. A page with a filtered state subscription needs
+those entities too.
 
 The area card's rules follow the frontend: the card in
 src/panels/lovelace/cards/hui-area-card.ts and its feature "area-controls" in
@@ -26,7 +27,7 @@ AREA_CONTROLS_FEATURE = "area-controls"
 # isStrategyDashboard, and the same test for a view and a section).
 STRATEGY_KEY = "strategy"
 # Core cards and badges that find their entities by themselves, in a way that no rule of
-# this module follows. The home-summary card filters each entity by domain and area
+# this module follows. The home-summary card selects its entities by domain and area
 # (src/panels/lovelace/cards/hui-home-summary-card.ts). The energy, water and power cards
 # and the three total badges take their entities from the energy settings. The names
 # come from src/panels/lovelace/create-element/create-card-element.ts and
@@ -307,10 +308,11 @@ def discovered_entities(
 def registry_entities(hass: Any) -> list[RegistryEntity]:
     """Return each enabled entity in the entity registry, with its area and device class.
 
-    The area is the area of the entity itself, or else the effective area of its device: a
-    child device with no area of its own takes the area of its parent device. The device
-    class is the attribute on the state, which is the value that the frontend filters on.
-    An entity with no state yet takes the device class from the registry.
+    The area is the area of the entity itself, or else the effective area of the
+    entity's device in the device registry. There, a child device with no area of its
+    own takes the area of its parent device. The device class is the attribute on the
+    state, because the frontend selects entities by that value. An entity with no state
+    yet takes the device class from the registry.
     """
     from homeassistant.helpers import device_registry as dr, entity_registry as er
 

@@ -1,6 +1,6 @@
 """Resource matching for the dashboards a lite user actually opens.
 
-The cases come from a wall panel that loaded two unused card files and
+The cases come from a wall panel that loaded two unused resource files and
 skipped Mushroom, which its dashboards do use. Card types are nested the
 way a sections dashboard, a stack, auto-entities and a browser_mod popup
 store them. One of the two dashboards is not linked from anywhere.
@@ -275,7 +275,7 @@ class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = self._tmp.name
         _write(self.root, "lovelace-mushroom/mushroom.js", MUSHROOM_JS)
-        # Same bundle under a generic file name: only the script contents match.
+        # Same bundle under a generic file name: only the file contents match.
         _write(self.root, "lovelace-mushroom/cards.js", MUSHROOM_JS)
         _write(self.root, "button-card/button-card.js", BUTTON_CARD_JS)
         _write(self.root, "lock-manager/lock-manager.js", LOCK_MANAGER_JS)
@@ -539,7 +539,7 @@ class ResolveResourcesTest(unittest.IsolatedAsyncioTestCase):
         used = await self._resolve(**{CONF_DASHBOARDS: ["cameras"]})
         self.assertIn("/webrtc/webrtc-camera.js?v=v3.6.1", used["included"])
 
-        # A dashboard with no such camera does not load the script.
+        # A dashboard with no such camera does not load that resource.
         unused = await self._resolve(**{CONF_DASHBOARDS: ["panel"]})
         self.assertIn("/webrtc/webrtc-camera.js?v=v3.6.1", unused["excluded"])
 

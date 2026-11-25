@@ -151,8 +151,9 @@ def _async_register_admin_service(
 def _async_at_started(hass, at_start_cb):
     """Stand-in for helpers.start.async_at_started.
 
-    The callback runs at once when the start is complete (`hass.started`), and otherwise
-    at the event homeassistant_started. The result removes a listener that still waits.
+    The callback runs immediately when the start is complete (`hass.started`), and
+    otherwise at the event homeassistant_started. The result removes a listener that
+    still waits.
     """
     if hass.started:
         hass.async_create_task(at_start_cb(hass))
@@ -215,7 +216,7 @@ def install_homeassistant_stubs() -> None:
     if not hasattr(exceptions, "ConfigEntryNotReady"):
 
         class ConfigEntryNotReady(exceptions.HomeAssistantError):
-            """Stand-in for the error that asks Home Assistant to try the setup again."""
+            """Stand-in for the error that asks Home Assistant to retry the setup."""
 
         exceptions.ConfigEntryNotReady = ConfigEntryNotReady
 

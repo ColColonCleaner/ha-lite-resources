@@ -221,7 +221,8 @@ class DashboardEntitiesTest(unittest.IsolatedAsyncioTestCase):
             _entry("lock.side_door", area_id="side_door"),
             _entry("camera.side_door", area_id="side_door"),
             _entry("light.side_door", area_id="side_door"),
-            # The area comes from the device, and for a child device from its parent.
+            # The area comes from the entity's device in the device registry, and for a
+            # child device from its parent device.
             _entry("light.porch", device_id="d-switch"),
             _entry("binary_sensor.doorbell_side_motion", device_id="d-child"),
             _entry(

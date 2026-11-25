@@ -1,4 +1,6 @@
-"""The script scripts/validate.py runs each validation, and it lets none pass by default.
+"""The script scripts/validate.py runs each check of the validation.
+
+It lets no check pass by default.
 
 The checks of the script and of the Validate workflow must stay the same. hassfest must
 run with no network and no volume, from an image that is named by its digest.
@@ -99,8 +101,8 @@ class ChecksTest(unittest.TestCase):
         )
 
     def test_each_place_names_one_tag_of_the_core_source(self) -> None:
-        # The workflow, the README and the configuration of the full type check each give
-        # the command that clones Home Assistant core. One tag serves all three.
+        # The workflow, the README and the settings of the full type check each give the
+        # command that clones Home Assistant core. One tag serves all three.
         tags = []
         for name in (
             ".github/workflows/validate.yaml",
