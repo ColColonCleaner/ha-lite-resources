@@ -11,38 +11,34 @@
 
 This repository is a fork of version 0.2.1 of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). The fork needs Home Assistant 2026.11 or later. On an older version, use the original, which needs Home Assistant 2025.1 or later. The [changelog](CHANGELOG.md) describes each change in full.
 
-This integration makes a dashboard fast on a slow device. You choose the Home Assistant users that your slow devices log in as. These users are the lite users. The integration reads their dashboards, and it sends those devices only what the dashboards use.
-
-**Resource filtering** sends only the resources that the dashboards need. A resource is an entry in Home Assistant's list of dashboard resources, and in most cases it names the JavaScript file of a custom card. **State filtering** sends only the states of the entities that the dashboards show. The integration finds those resources with a **resource scan** of the dashboards, and those entities with an **entity scan**. A **page** is one browser tab or app window that shows Home Assistant.
+**Resource filtering** sends a slow device only the resources that its dashboards need. A resource is an entry in Home Assistant's list of dashboard resources, and in most cases it names the JavaScript file of a custom card. **State filtering** sends that device only the states of the entities that its dashboards show. The integration finds those resources with a **resource scan** of the dashboards, and those entities with an **entity scan**. A **page** is one browser tab or app window that shows Home Assistant.
 
 ### Added features
 
 - **Each set of devices can have its own dashboards.** A [group](#groups) holds the users that one set of devices logs in as, and the dashboards that those devices show.
+- **The automatic selection of resources finds more cards.** The integration selects the resources of a group from the group's dashboards. This fork also finds the resource of a card type that a minified file registers in a form that the original could not read. It finds the resource of a card type that only a template names, such as a template that returns `{type: 'custom:...'}`. It also finds the resource of the custom integration WebRTC Camera, which the Advanced Camera Card needs for a WebRTC live view. With the original, you selected each such resource by hand under **Always include**.
 - **The entities of a saved dashboard reach the open pages immediately.** When you save a dashboard or change a group, each open page of the group gets the states of the new entities without a page reload. Only a custom card type that is new to the dashboards needs one page reload.
 - **An edit to the file of a YAML dashboard reaches the open pages when a page next opens that dashboard.** Home Assistant reads the file again at that time. Each open page of a group with that dashboard then gets the states of the new entities.
 - **Entity and resource scans now have a timeout, and entity scans have retries.** An entity scan or a resource scan that hangs no longer blocks a page for more than 30 seconds. The integration retries a failed entity scan automatically, up to 6 times. Until the entity scan succeeds, a page that connects gets all states. Until the resource scan succeeds, a page that loads gets all resources.
-- **A card in a minified file now loads.** The integration finds a card's resource by the card type that the resource file registers, and some minified files hide that registration. For such a card, the integration now sends each resource whose file names the card type.
 - **The action `lite_resources.preview` shows what each group gets.** For each group, the action shows the resources and the entities that the group's pages get. It also shows the reason when state filtering or resource filtering is off.
 - **The group form validates its input.** The form rejects a group with no name, no user or no dashboard. It also rejects a user that is already in another group.
 - **Unit tests and static checks cover the integration.** `ruff` runs the static checks, and `mypy` runs the type checks. One script runs the full validation before a commit, and a workflow makes each release.
 
 ### Corrections to the original
 
-Version 0.2.1 of the original had these faults, and this integration corrects them.
+Version 0.2.1 of the original had these faults, and this fork corrects them.
 
 - **State filtering survives a Home Assistant restart.** After a restart, a page can reconnect before Home Assistant sets the integration up. In the original, such a page got all states until its next page reload.
 - **The area card, the scheduler card and the map card show their entities.** These cards find their entities themselves, and the stored dashboard does not list those entities. The original sent no states for them.
 - **An entity that gets its first state late still shows on the page.** The original left out an entity that had no state yet when the page connected, such as an entity of an integration that starts slowly.
-- **A dashboard that does not list its entities now shows all of them.** Home Assistant builds some dashboards automatically, such as the default dashboard before its first edit. For such a dashboard, the original sent the states of only two entities, `sun.sun` and `zone.home`, and the log said nothing. For a card that reads all entities, such as an energy card, the original sent no states for that card. This integration sends all states to the group of such a dashboard, and the log says why. See [When state filtering is off for a group](#when-state-filtering-is-off-for-a-group).
+- **A dashboard that does not list its entities now shows all of them.** Home Assistant builds some dashboards automatically, such as the default dashboard before its first edit. For such a dashboard, the original sent the states of only two entities, `sun.sun` and `zone.home`, and the log said nothing. For a card that reads all entities, such as an energy card, the original sent no states for that card. This fork sends all states to the group of such a dashboard, and the log says why. See [When state filtering is off for a group](#when-state-filtering-is-off-for-a-group).
 - **The choice `Overview (default)` now selects the dashboard that Home Assistant shows as its default.** This choice is in the option **Their dashboards**. When a dashboard with the URL path `lovelace` exists, Home Assistant 2026.11 shows that dashboard as its default, and the original read a different one.
 - **The integration finds an entity in a multi-line template.** The original missed an entity ID that directly follows a line break, so that entity showed as unavailable.
-- **A custom card that only a template names now loads.** The original found a card type only where it is the whole value of a key. So it missed a card type inside a template, such as a template that returns `{type: 'custom:...'}`, and that card failed to load.
-- **The Advanced Camera Card gets the resource for a WebRTC live view.** A camera that uses the custom integration WebRTC Camera for its live view needs a resource of that integration, and no card type in the dashboard names that resource. The original did not send it unless you listed it under **Always include**.
 - **One unreadable resource file no longer turns resource filtering off.** In the original, one unreadable resource file made the integration send every resource at each page reload, with an error in the log. A YAML dashboard whose file is missing did the same. Now an unreadable resource file counts as a resource that the integration cannot read, and the resource scan leaves out a dashboard that Home Assistant cannot load.
 - **Only administrators can perform `lite_resources.preview`.** Its response names users, dashboards and entities, and the original let any user perform it.
 - **You can save the group form after you delete a user or a dashboard in Home Assistant.** The original refused to save the form while it still held the deleted item.
 - **Removing the integration restores all states immediately.** The original left each open page with filtered states until its next page reload.
-- **This integration also corrects five smaller faults.** The integration no longer mistakes a resource on another server for a local file. **Always include** and **Always exclude** now match a resource by its server and its path, where the original matched by the path alone. The resource scan no longer mistakes unrelated text in a file for a card type. Each warning appears in the log once, and not at each page reload. A page that disconnects during an entity scan no longer leaves an unused event listener in Home Assistant until the next restart.
+- **This fork also corrects five smaller faults.** The integration no longer mistakes a resource on another server for a local file. **Always include** and **Always exclude** now match a resource by its server and its path, where the original matched by the path alone. The resource scan no longer mistakes unrelated text in a file for a card type. Each warning appears in the log once, and not at each page reload. A page that disconnects during an entity scan no longer leaves an unused event listener in Home Assistant until the next restart.
 
 ## What it does
 
@@ -323,10 +319,11 @@ This repository uses one word for one thing in each of its texts: this README, t
 | The integration reads a group's dashboards and resource files to find the resources that the dashboards use | **resource scan** | scan alone |
 | The integration sends a page only the states of its group's entities | **state filtering** | narrow, limit |
 | The integration sends a page only its group's resources | **resource filtering** | reduce, trim |
-| This integration, as the thing that acts | **this integration**, or `ha-lite-resources` | its display name, which stands only where a step names what Home Assistant shows |
+| The integration, in each of its versions, as the thing that acts | **this integration**, or `ha-lite-resources` | its display name, which stands only where a step names what Home Assistant shows |
+| The version of the integration in this repository, where a text compares it with the original | **this fork** | this integration |
 | A defect | **fault**, and a change **corrects** it | issue, bug |
 | An entry of the issue list on GitHub | **issue** | |
-| The repository `evski/ha-lite-resources` | **the original** | upstream |
+| The version of the integration in the repository `evski/ha-lite-resources` | **the original** | upstream |
 | Home Assistant sets the integration up | the integration's **setup** | start |
 | What the user entered for the integration | **configuration** | setup |
 | The checks before a commit | **validation**, with a **check** as one part of it | |

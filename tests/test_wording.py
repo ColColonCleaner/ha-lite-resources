@@ -38,6 +38,12 @@ PATTERNS = {
     "field, for an option": r"\bfields?\b",
     # A place in Home Assistant's settings takes its path. "page" is a browser tab.
     "page, for a place in the settings": r"\b(?:integration|repository)'s page\b",
+    # The original and this fork are two versions of the integration. A sentence that
+    # compares them names this fork.
+    "this integration, for this fork beside the original": (
+        r"[^.\n]*\bthe original\b[^.\n]*\bthis integration\b"
+        r"|[^.\n]*\bthis integration\b[^.\n]*\bthe original\b"
+    ),
     # The name of an option is bold. A single asterisk on each side is italics.
     "an option name in italics": (
         r"(?<!\*)\*(?:Always include|Always exclude|Extra entities)\*(?!\*)"

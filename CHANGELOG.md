@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The README names this fork where it compares the fork with the original.** `This integration` names `ha-lite-resources` in each of its versions, and the original and this fork are two versions of it.
+- **The README's list of added features has one entry for the automatic selection of resources,** in the second place. It holds three cases that had an entry each. They are a card in a minified file, a card that only a template names, and the WebRTC resource for the Advanced Camera Card.
+
 ## 0.3.10 - 2026-11-25
 
 This version changes the wording of the texts, and it gives new names to three keys of the preview action. The integration's behaviour does not change.
