@@ -55,5 +55,65 @@ class ReadmeTest(unittest.TestCase):
         self.assertIn("**Settings → Marketplace**", self.readme)
 
 
+SECTION = "## What this fork changes"
+FEATURES = "### Added features"
+ISSUES = "### Fixed issues of the original"
+# A word that names a test, a static check, the format or the release tooling.
+_TOOLING = re.compile(r"\b(tests?|ruff|mypy|lint|format|workflow)\b", re.IGNORECASE)
+
+
+class ForkDifferencesTest(unittest.TestCase):
+    """The README states the difference between this fork and the original near its top."""
+
+    def setUp(self) -> None:
+        self.readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.section = self.readme.split(SECTION)[1].split("\n## ")[0]
+
+    def _entries(self, heading: str) -> list[str]:
+        """Return the list entries under one heading of the section."""
+        part = self.section.split(heading)[1].split("\n### ")[0]
+        return [line[2:] for line in part.splitlines() if line.startswith("- ")]
+
+    def test_section_comes_directly_after_the_short_description(self) -> None:
+        """Only the title, the badges and the short description come before it."""
+        self.assertEqual(self.readme.count(SECTION), 1)
+        before = self.readme.split(SECTION)[0]
+        blocks = [block.strip() for block in before.split("\n\n") if block.strip()]
+        self.assertEqual(len(blocks), 3, blocks)
+        self.assertEqual(blocks[0], "# Lite Resources")
+        self.assertTrue(blocks[1].startswith("[!["), blocks[1])
+        self.assertTrue(blocks[2].startswith("**"), blocks[2])
+        self.assertTrue(blocks[2].endswith("**"), blocks[2])
+
+    def test_added_features_come_before_the_fixed_issues(self) -> None:
+        """The section has these two lists, in this order, and each has entries."""
+        self.assertEqual(
+            re.findall(r"^### .*$", self.section, re.MULTILINE), [FEATURES, ISSUES]
+        )
+        self.assertTrue(self._entries(FEATURES))
+        self.assertTrue(self._entries(ISSUES))
+
+    def test_tests_and_style_are_one_short_entry_of_the_added_features(self) -> None:
+        """The tooling has one entry, and the list of fixed issues holds none of it."""
+        tooling = [entry for entry in self._entries(FEATURES) if _TOOLING.search(entry)]
+        self.assertEqual(len(tooling), 1, tooling)
+        self.assertLessEqual(len(tooling[0]), 250)
+        self.assertEqual(
+            [entry for entry in self._entries(ISSUES) if _TOOLING.search(entry)], []
+        )
+
+    def test_section_names_the_original_and_its_version(self) -> None:
+        """A reader can find the code that the list of fixed issues speaks of."""
+        intro = self.section.split(FEATURES)[0]
+        self.assertIn("https://github.com/evski/ha-lite-resources", intro)
+        self.assertIn("0.2.1", intro)
+        self.assertIn("(CHANGELOG.md)", intro)
+
+    def test_release_steps_keep_the_section_current(self) -> None:
+        """The steps of a release name the section, so that each version updates it."""
+        steps = self.readme.split("## Releasing")[1].split("## License")[0]
+        self.assertIn("(#what-this-fork-changes)", steps)
+
+
 if __name__ == "__main__":
     unittest.main()

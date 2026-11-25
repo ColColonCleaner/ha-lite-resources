@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The README states the difference between this fork and the original near its top,** directly after the short description. The added features come first, and the fixed issues of the original come after them. A fault that this fork made and then corrected is not in that list. Each entry of the list of fixed issues rests on a read of the original's code at version 0.2.1.
+- The README's steps for a release keep that section current, and new tests keep its place and its order.
+- The paragraphs after that section have the new heading `What it does`.
+
 ## 0.3.9 - 2026-11-24
 
 A fourth independent review read the changes of 0.3.8 and the two commits with the static checks. It gave 22 findings: no critical one, no high one, 4 medium and 18 low. Each fault in behaviour needs a scan that fails, a scan that hangs or a YAML dashboard. The review found no fault on the path of a panel whose dashboards are stored in the UI and whose scan works. This version corrects each finding, and it states each limit that stays. It also adds a second type check, which reads the types of Home Assistant from the source of its core.

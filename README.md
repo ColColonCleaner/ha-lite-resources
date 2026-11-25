@@ -5,9 +5,43 @@
 [![Validate](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml/badge.svg)](https://github.com/ColColonCleaner/ha-lite-resources/actions/workflows/validate.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This repository is a fork of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). It adds [groups](#groups) of lite users, each with its own dashboards.
-
 **Make Home Assistant dashboards fast on wall panels, old tablets and other low-powered screens - without changing anything for your phones and computers.**
+
+## What this fork changes
+
+This repository is a fork of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources), from its version 0.2.1. It needs Home Assistant 2026.11 or later, where the original needs 2025.1. The [changelog](CHANGELOG.md) holds each change in full.
+
+### Added features
+
+- **Groups of lite users.** Each [group](#groups) has its own users, dashboards and options, and a user is in one group only. The update turns a 0.2.x setup into one group by itself.
+- **An open panel follows each change with no page load:** a saved dashboard, a changed group, and a change in the entity, device or area registry.
+- **A changed YAML dashboard file** reaches each open panel at the next load of that dashboard.
+- **A group that cannot be narrowed gets all states, and the log says why.** This holds for a dashboard that a strategy builds, and for a card that reads all entities, such as an energy card. See [When a group's states are not narrowed](#when-a-groups-states-are-not-narrowed).
+- **Each scan has a time limit of 30 seconds, and a failed scan gets up to 6 later tries.**
+- **The scan keeps more of the files that a panel needs:** the file of a card that registers itself in a way that the scan cannot read, and the WebRTC Camera script for an Advanced Camera Card.
+- **The action `lite_resources.preview` gives one item for each group,** with the count of its open pages and the reason when the group is not narrowed.
+- **The group form checks its values.** It refuses a group with no name, no user or no dashboard, and a user of another group.
+- **Tests and code style.** Unit tests for each part of the integration, static checks with `ruff` and `mypy`, one script that runs each validation before a commit, and a workflow that makes each release.
+
+### Fixed issues of the original
+
+Each fault in this list is in the original at its version 0.2.1. A fault that this fork made and then corrected is not in the list, and the changelog holds those.
+
+- **A restart of Home Assistant gave a panel every entity again.** A panel that connected again before the integration's setup kept the stream of all states until its next page load.
+- **A card that finds its entities by itself got none of them.** The scan took only the entity IDs that a dashboard's configuration names. So an area card, a scheduler card and a map card that shows all devices stayed without their entities.
+- **An entity with no state at the time of the page load never arrived,** such as an entity of an integration that starts late.
+- **A dashboard with no stored configuration gave a panel two entities,** `sun.sun` and `zone.home`, with no line in the log. The default dashboard before its first edit is such a dashboard. A dashboard that a strategy builds had a like result.
+- **`Overview (default)` named the wrong dashboard** when a dashboard with the URL `lovelace` exists, as in YAML mode.
+- **The scan read a dashboard as JSON text.** It missed an entity ID directly after a line break in a text. A value that JSON cannot hold turned the state filter off, with an error in the log at each page load.
+- **A card type inside a template was not seen,** so the panel did not get the card's file.
+- **One resource file that could not be read made each page load send the full list,** with an error in the log. A YAML dashboard whose file is gone had the same effect, also for the states.
+- **Each signed-in user could call `lite_resources.preview`,** which names the users, the dashboards and the entities. The action is now for administrators only.
+- **The settings form could not be saved** while it held a deleted user, a deleted dashboard, or a resource whose URL changed.
+- **A removal or an unload of the integration left each open panel with its narrowed states** until its next page load.
+- **A connection that closed during a scan left a state listener** until the restart of Home Assistant, and a scan had no time limit.
+- **Smaller faults of the resource scan.** A resource URL with a host counted as a local file, and `Always include` and `Always exclude` ignored the host. Joined pieces of a name in a file gave wrong card names. One warning came at each page load, and one kind of warning never came.
+
+## What it does
 
 Home Assistant sends every screen the same thing: *every* custom card you've ever installed, and a live update for *every* entity in your home, whether or not that screen shows it. A phone shrugs that off. A wall panel with a slow chip spends its life downloading JavaScript it never runs and processing updates for sensors it never displays - and you feel it as a laggy, stuttering dashboard.
 
@@ -262,7 +296,7 @@ On Windows, set `MYPYPATH` with your shell's syntax. The Validate workflow runs 
 
 Each version has a release on GitHub. Its tag is `v` plus the manifest's version, such as `v0.3.9`. Home Assistant shows that tag as the integration's version, and it shows a commit hash for a repository with no release.
 
-1. Set `version` in `custom_components/lite_resources/manifest.json` to the new version. Give `CHANGELOG.md` an entry for that version, and leave its section `Unreleased` empty.
+1. Set `version` in `custom_components/lite_resources/manifest.json` to the new version. Give `CHANGELOG.md` an entry for that version, and leave its section `Unreleased` empty. Add each new feature, and each corrected fault of the original, to the section [What this fork changes](#what-this-fork-changes). A fault that this fork made is not for that section.
 2. Run `python scripts/validate.py`. When each check passes, commit, and push the commit to `main`.
 3. Run `python scripts/release_notes.py` with the tag, such as `python scripts/release_notes.py v0.3.9`. It prints the notes of the release, or it says why the tag is wrong.
 4. Make the tag on that commit, and push it:
