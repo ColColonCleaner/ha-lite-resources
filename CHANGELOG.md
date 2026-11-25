@@ -9,6 +9,7 @@ This version gives one term a new name, and two keys of the preview action take 
 - **`state filtering` is now `entity filtering`.** The filter selects entities, and a page gets each state of a selected entity. No value of a state decides what a page gets. Home Assistant uses the same words in its tools: `Filter entities` selects by the entity, and `Filter states` selects by the value.
 - **Two keys of `lite_resources.preview` have new names.** `states_not_filtered` is now `entities_not_filtered`, and `open_pages_with_filtered_states` is now `open_pages_with_filtered_entities`. An automation or a script that reads one of these keys needs the new name.
 - **Log messages take the new term.** `State filtering is off for group` is now `Entity filtering is off for group`. A search or a filter on the log's text needs the new text.
+- **The standards of the repository moved from the README to `CONTRIBUTING.md`:** the validation before a commit, the word table and the steps of a release. The README now holds what a user of the integration needs.
 - **The README names this fork where it compares the fork with the original.** `This integration` names `ha-lite-resources` in each of its versions, and the original and this fork are two versions of it.
 - **The README's list of added features has one entry for the automatic selection of resources,** in the second place. It holds three cases that had an entry each. They are a card in a minified file, a card that only a template names, and the WebRTC resource for the Advanced Camera Card.
 

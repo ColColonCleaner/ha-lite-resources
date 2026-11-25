@@ -1,4 +1,4 @@
-"""The texts keep to the words of the README's section "One word for one thing".
+"""The texts keep to the words of the section "One word for one thing" of CONTRIBUTING.md.
 
 A reader who meets two words for one thing asks if the second word is a second thing. Each
 pattern below is a word or a construction that an earlier version held, and that the texts
@@ -15,7 +15,7 @@ import unittest
 from support import ROOT
 
 INTEGRATION = ROOT / "custom_components" / "lite_resources"
-WORD_TABLE = "### One word for one thing"
+WORD_TABLE = "## One word for one thing"
 FIRST_ORIGINAL_ENTRY = "## 0.2.1"
 
 PATTERNS = {
@@ -62,8 +62,13 @@ def _without_code(text: str) -> str:
 
 
 def _readme() -> str:
-    """Return the README without its word table, which names the words to avoid."""
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    """Return the README, which is the text for a user of the integration."""
+    return _without_code((ROOT / "README.md").read_text(encoding="utf-8"))
+
+
+def _contributing() -> str:
+    """Return CONTRIBUTING.md without its word table, which names the words to avoid."""
+    text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
     before, _, rest = text.partition(WORD_TABLE)
     _, _, after = rest.partition("\n## ")
     return _without_code(before + after)
@@ -102,16 +107,19 @@ class WordingTest(unittest.TestCase):
     def test_readme(self) -> None:
         self._check("README.md", _readme())
 
+    def test_contributing(self) -> None:
+        self._check("CONTRIBUTING.md", _contributing())
+
     def test_changelog_entries_of_this_fork(self) -> None:
         self._check("CHANGELOG.md", _changelog())
 
     def test_form_texts(self) -> None:
         self._check("strings.json", _form_texts())
 
-    def test_word_table_is_in_the_readme(self) -> None:
+    def test_word_table_is_in_contributing(self) -> None:
         """The checks leave the table out, so the table must be there to leave out."""
         self.assertEqual(
-            (ROOT / "README.md").read_text(encoding="utf-8").count(WORD_TABLE), 1
+            (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8").count(WORD_TABLE), 1
         )
 
 

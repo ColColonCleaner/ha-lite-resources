@@ -63,10 +63,10 @@ class ReleaseMetadataTest(unittest.TestCase):
         self.assertTrue(icon.is_file())
         self.assertGreater(icon.stat().st_size, 0)
 
-    def test_readme_gives_the_release_steps(self) -> None:
+    def test_contributing_gives_the_release_steps(self) -> None:
         """A release follows the local validation and the check of its tag."""
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        steps = readme.split("## Releasing")[1].split("## License")[0]
+        contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        steps = contributing.split("\n## Releasing\n")[1]
         validate = steps.index("python scripts/validate.py")
         check = steps.index("python scripts/release_notes.py")
         push = steps.index("git push origin v")

@@ -101,12 +101,12 @@ class ChecksTest(unittest.TestCase):
         )
 
     def test_each_place_names_one_tag_of_the_core_source(self) -> None:
-        # The workflow, the README and the settings of the full type check each give the
-        # command that clones Home Assistant core. One tag serves all three.
+        # The workflow, CONTRIBUTING.md and the settings of the full type check each give
+        # the command that clones Home Assistant core. One tag serves all three.
         tags = []
         for name in (
             ".github/workflows/validate.yaml",
-            "README.md",
+            "CONTRIBUTING.md",
             "mypy-homeassistant.ini",
         ):
             text = (ROOT / name).read_text(encoding="utf-8")

@@ -3,7 +3,7 @@
     python scripts/validate.py
 
 Run it from any folder, before each commit, with a Python that holds the packages of the
-checks. The README names them with their versions. The script runs the unit tests, the
+checks. CONTRIBUTING.md names them with their versions. The script runs the unit tests, the
 static checks and the format check of ruff, both type checks of mypy, and hassfest. It
 prints the result of each check. It exits with 1 when a check fails or cannot run, and
 no option leaves a check out.

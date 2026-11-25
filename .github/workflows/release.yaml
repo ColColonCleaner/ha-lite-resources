@@ -2,7 +2,7 @@ name: Release
 
 # Makes the GitHub release of a version tag, with the changelog entry of the version as its
 # notes. The script scripts/release_notes.py holds each check and the request, so that the
-# unit tests cover them. README.md, section Releasing, gives the steps before the tag.
+# unit tests cover them. CONTRIBUTING.md, section Releasing, gives the steps before the tag.
 on:
   push:
     tags:

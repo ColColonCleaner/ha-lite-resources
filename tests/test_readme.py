@@ -126,8 +126,17 @@ class ForkDifferencesTest(unittest.TestCase):
 
     def test_release_steps_keep_the_section_current(self) -> None:
         """The steps of a release name the section, so that each version updates it."""
-        steps = self.readme.split("## Releasing")[1].split("## License")[0]
-        self.assertIn("(#what-this-fork-changes)", steps)
+        contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        steps = contributing.split("\n## Releasing\n")[1]
+        self.assertIn("(README.md#what-this-fork-changes)", steps)
+
+    def test_readme_holds_no_standard_of_the_repository(self) -> None:
+        """The README is for a user of the integration, and it names the other document."""
+        for heading in ("## Releasing", "One word for one thing", "## Validation"):
+            self.assertNotIn(heading, self.readme)
+        for command in ("scripts/validate.py", "scripts/release_notes.py", "git tag"):
+            self.assertNotIn(command, self.readme)
+        self.assertIn("(CONTRIBUTING.md)", self.readme)
 
 
 if __name__ == "__main__":
