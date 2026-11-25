@@ -21,7 +21,11 @@ FIRST_ORIGINAL_ENTRY = "## 0.2.1"
 PATTERNS = {
     "a possessive before own": r"\b\w+'s own\b",
     "two possessives in a row": r"\b\w+'s \w+'s\b",
-    "narrow, for state filtering": r"\bnarrow(?:s|ed|ing)?\b",
+    "narrow, for entity filtering": r"\bnarrow(?:s|ed|ing)?\b",
+    # The filter selects entities. A filter of states selects by the value of a state.
+    "state filtering, for entity filtering": (
+        r"\bstate filtering\b|\bfiltered states\b|\bfilters? the states\b"
+    ),
     "time limit, for a timeout": r"\btime limits?\b",
     "later tries, for retries": r"\blater tr(?:y|ies)\b",
     # The singular only: "a page loads" is a page and a verb.

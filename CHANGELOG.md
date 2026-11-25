@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.11 - 2026-11-25
+
+This version gives one term a new name, and two keys of the preview action take that name. The integration's behaviour does not change.
+
+- **`state filtering` is now `entity filtering`.** The filter selects entities, and a page gets each state of a selected entity. No value of a state decides what a page gets. Home Assistant uses the same words in its tools: `Filter entities` selects by the entity, and `Filter states` selects by the value.
+- **Two keys of `lite_resources.preview` have new names.** `states_not_filtered` is now `entities_not_filtered`, and `open_pages_with_filtered_states` is now `open_pages_with_filtered_entities`. An automation or a script that reads one of these keys needs the new name.
+- **Log messages take the new term.** `State filtering is off for group` is now `Entity filtering is off for group`. A search or a filter on the log's text needs the new text.
 - **The README names this fork where it compares the fork with the original.** `This integration` names `ha-lite-resources` in each of its versions, and the original and this fork are two versions of it.
 - **The README's list of added features has one entry for the automatic selection of resources,** in the second place. It holds three cases that had an entry each. They are a card in a minified file, a card that only a template names, and the WebRTC resource for the Advanced Camera Card.
 
@@ -16,7 +23,7 @@ This version changes the wording of the texts, and it gives new names to three k
 - **The descriptions of two options say more.** The description of `Include resources that the integration cannot read` now says what the off position does. The description of `Only send states their dashboards show` now names the entities under `Extra entities`.
 - **Log messages have new wording.** A search or a filter on the log's text needs the new text, such as `State filtering is off for group`.
 - **The README says near its top what this fork changes:** the added features first, and then the corrections to the original.
-- **The README answers more of a new reader's questions:** what a strategy is, why to edit a dashboard as a normal user, which install keeps a 0.2.x configuration, and what to do when state filtering fails after a restart on a later Home Assistant version.
+- **The README answers more of a new reader's questions:** what a strategy is, why to edit a dashboard as a normal user, which install keeps a 0.2.x configuration, and what to do when entity filtering fails after a restart on a later Home Assistant version.
 - **The README gives the path to the actions tool in Home Assistant 2026.11,** which is `Settings → Tools → Actions`.
 - **New tests check the README.** They fail when the section on the fork moves from the top, or when a text holds a replaced word.
 
@@ -81,7 +88,7 @@ These changes also came after the first commit of version 0.3.9, and the integra
 ### Other paths
 
 - **A page that asks for its resources during a reload of the integration gets the filtered resource list.** 0.3.8 answered such a request with the full resource list. Now the request goes to the handler that is registered at that time, as a state subscription does. After a reload of the integration, that is the new setup's handler.
-- **A registry change starts no entity scan for a group whose state filtering is off by design.** State filtering is off for a group with a strategy, a card that finds its own entities, or a dashboard with no stored configuration, and no registry change alters that. 0.3.8 ran an entity scan of the group again at each burst of registry events, which come each 10 seconds while Home Assistant starts. The integration now remembers such a group until a dashboard or a group changes.
+- **A registry change starts no entity scan for a group whose entity filtering is off by design.** Entity filtering is off for a group with a strategy, a card that finds its own entities, or a dashboard with no stored configuration, and no registry change alters that. 0.3.8 ran an entity scan of the group again at each burst of registry events, which come each 10 seconds while Home Assistant starts. The integration now remembers such a group until a dashboard or a group changes.
 - **One update runs one entity scan for a group.** Before, a group with a filtered page and a page on all states got two entity scans in one update.
 - **An update for one group leaves the other groups alone.** Before, the search for pages with all states ran an entity scan for each group.
 - **A word that only ends in `type`, such as `prototype`, no longer names a card type.** 0.3.8 read `prototype: custom:x` and `subtype=custom:x` in a text as a card type. The pattern now asks for a boundary before `type`.
@@ -144,20 +151,20 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 
 ### Pages that kept all states
 
-- **A dashboard that Home Assistant cannot load turns state filtering off, and the log gives the real reason.** 0.3.6 left such a dashboard out of the entity scan, so the pages of the group stayed filtered, without that dashboard's entities. When the file was correct again, no event came, and a page that opened the dashboard had no state on it. Now the pages of the group get all states, the log gives the error of the load, and the integration retries the entity scan. The resource list still leaves such a dashboard out.
+- **A dashboard that Home Assistant cannot load turns entity filtering off, and the log gives the real reason.** 0.3.6 left such a dashboard out of the entity scan, so the pages of the group stayed filtered, without that dashboard's entities. When the file was correct again, no event came, and a page that opened the dashboard had no state on it. Now the pages of the group get all states, the log gives the error of the load, and the integration retries the entity scan. The resource list still leaves such a dashboard out.
 - **The integration retries a failed entity scan.** A page that got all states after an error of the entity scan, a timeout or a load error kept them until another event. Now the integration retries the entity scan, at most 6 times, with 10 seconds between the retries. One count served all groups, so a group could get fewer retries, which 0.3.9 corrects. When a retry works, the integration filters the state subscription of each open page of the group. When the entity scan for a new page works after such a fault, the integration filters the other pages of its group also.
-- **A registry change turns state filtering on for a page that holds all states.** Before, a registry change started no update while no filtered page was open.
-- **State filtering holds for a page that connects during a reload of the integration.** 0.3.6 passed a page whose entity scan was open at the reload to the handler that the old setup held. The page got all states, and the new setup did not know it. Now the page goes to the handler that is registered at that time.
+- **A registry change turns entity filtering on for a page that holds all states.** Before, a registry change started no update while no filtered page was open.
+- **Entity filtering holds for a page that connects during a reload of the integration.** 0.3.6 passed a page whose entity scan was open at the reload to the handler that the old setup held. The page got all states, and the new setup did not know it. Now the page goes to the handler that is registered at that time.
 - **A hanging entity scan of one group holds only one thread.** While the entity scan of a group still runs after its timeout, the next entity scan of that group waits for its end. It starts no second load. A resource request and the preview action each start a load of their own.
 - **The integration runs no entity scan for a page that already left.** The task read the page's state only after its entity scan. A task that got its turn after an unload also ran a full entity scan and then dropped the result. Both checks now come before the entity scan.
 - **A page that asks for its resources during an unload of the integration gets the full resource list.** The handler read the unload flag only before its resource scan.
 
 ### The entity scan and the resource scan
 
-- **A strategy section in a sidebar, or inside another section, turns state filtering off.** The frontend makes a section for each item in `sidebar.sections` of a view, and for each item in `sections` of a section. 0.3.6 read the key `strategy` only in the sections of a view.
+- **A strategy section in a sidebar, or inside another section, turns entity filtering off.** The frontend makes a section for each item in `sidebar.sections` of a view, and for each item in `sections` of a section. 0.3.6 read the key `strategy` only in the sections of a view.
 - **A custom card that a template names by a quoted `custom:` type loads again.** 0.3.6 took such a type inside a longer string only after the word `type`. A template that returns `'custom:name'` by itself named no card, and neither did YAML text with no quotes. The integration did not send the resource of such a card.
 - **A name of three joined pieces in a resource file no longer gives a wrong card type.** The text `"my-" + "fancy-" + "thing"` gave the guess the name `fancy-thing`, which the file does not hold.
-- **A warning comes again when its cause comes back after a good load.** The warning for a dashboard that cannot be loaded had a key with the dashboard's name only. So a later error of the same dashboard gave no warning. The key now holds the error text, and a good load clears it. The integration clears the reasons why state filtering or resource filtering is off for a group in the same way.
+- **A warning comes again when its cause comes back after a good load.** The warning for a dashboard that cannot be loaded had a key with the dashboard's name only. So a later error of the same dashboard gave no warning. The key now holds the error text, and a good load clears it. The integration clears the reasons why entity filtering or resource filtering is off for a group in the same way.
 
 ### Tests and static checks
 
@@ -195,11 +202,11 @@ A third independent review read the changes of 0.3.6 and 0.3.7, and it gave 20 f
 
 A second independent review covered the whole code at 0.3.5. It gave 35 findings: none critical, 1 high, 6 medium and 28 low. 24 of them are in code that 0.3.5 added. This version corrects each fault that the review confirmed, and it states each limit that stays. Three findings did not hold against the source of Home Assistant 2026.11.2, and the end of this entry names them.
 
-### Rules of 0.3.5 that turned state filtering off too often
+### Rules of 0.3.5 that turned entity filtering off too often
 
-- **A card feature with a name like an energy card's no longer turns state filtering off. (high)** 0.3.5 took each `type` that starts with `energy-`, `water-`, `power-` or `gas-` as an energy settings card, in each mapping of a dashboard. A tile card's feature `water-heater-operation-modes` is none of these, and one such feature sent all states to each page in the group. The rule now holds the frontend's exact card and badge types, and it reads no type inside a card's features.
-- **A key `strategy` in a card's options no longer turns state filtering off.** 0.3.5 took that key in each mapping as a strategy, even as a custom card's option or in an action's data. The key now counts only where the frontend reads it: at the dashboard, at a view and at a section.
-- **One dashboard that Home Assistant cannot load no longer turns state filtering off.** 0.3.5 took each load error as a dashboard with no stored configuration, so one YAML dashboard with a syntax error turned state filtering off for its group. Only a dashboard with no stored configuration does that now. Another load error leaves the dashboard out, with one warning that gives the error.
+- **A card feature with a name like an energy card's no longer turns entity filtering off. (high)** 0.3.5 took each `type` that starts with `energy-`, `water-`, `power-` or `gas-` as an energy settings card, in each mapping of a dashboard. A tile card's feature `water-heater-operation-modes` is none of these, and one such feature sent all states to each page in the group. The rule now holds the frontend's exact card and badge types, and it reads no type inside a card's features.
+- **A key `strategy` in a card's options no longer turns entity filtering off.** 0.3.5 took that key in each mapping as a strategy, even as a custom card's option or in an action's data. The key now counts only where the frontend reads it: at the dashboard, at a view and at a section.
+- **One dashboard that Home Assistant cannot load no longer turns entity filtering off.** 0.3.5 took each load error as a dashboard with no stored configuration, so one YAML dashboard with a syntax error turned entity filtering off for its group. Only a dashboard with no stored configuration does that now. Another load error leaves the dashboard out, with one warning that gives the error.
 
 ### An open page's state subscription
 
@@ -240,7 +247,7 @@ A second independent review covered the whole code at 0.3.5. It gave 35 findings
 
 ### Limits that stay
 
-- **When a dashboard save turns state filtering off for a group, each open page of the group gets all states.** A dashboard save can add a strategy, a home-summary card or an energy card. Each open page in the group then gets all states in one message, about 1.4 MB for 5,573 entities. Each page also gets each state change after that. The log holds one warning with the reason. An unload and a reload of the integration send the same message once.
+- **When a dashboard save turns entity filtering off for a group, each open page of the group gets all states.** A dashboard save can add a strategy, a home-summary card or an energy card. Each open page in the group then gets all states in one message, about 1.4 MB for 5,573 entities. Each page also gets each state change after that. The log holds one warning with the reason. An unload and a reload of the integration send the same message once.
 - **A custom strategy that makes custom cards** names no card in the stored dashboard. Add each such card's resource under **Always include**.
 - **When a file gives one short name more than one value, each value joins each template that uses that name.** A minified resource file can then seem to provide a card that it does not hold, and a page loads it for nothing. No real resource file showed this.
 - **Each state subscription runs an entity scan of about 20 ms to 40 ms for 5,573 entities.** Pages that connect together share no result. A change to one entity sends its whole set again to each open page in the group.
@@ -250,7 +257,7 @@ A second independent review covered the whole code at 0.3.5. It gave 35 findings
 
 An independent review of the whole code gave 51 findings: 1 critical, 1 high, 5 medium and 44 low. This version corrects each fault that it confirmed, and it states each limit that stays. Each point is in the list below.
 
-A second review found faults in this version, and 0.3.6 corrects them. The largest one: three new rules turned state filtering off too often, so install 0.3.6 and not this version.
+A second review found faults in this version, and 0.3.6 corrects them. The largest one: three new rules turned entity filtering off too often, so install 0.3.6 and not this version.
 
 ### An open page's state subscription
 
@@ -260,7 +267,7 @@ A second review found faults in this version, and 0.3.6 corrects them. The large
 - **A reload of the integration no longer loses the open pages.** Before, the new setup did not know the pages that the old setup filtered. A saved dashboard, a changed group and a deleted group then changed nothing for them. The unload now returns each page to all states, and the new setup filters it again.
 - **A page that closes during the entity scan no longer leaves a state listener behind.** The entity scan reads a group's dashboards to find their entities. It can wait, such as at a dashboard's first load or for a YAML dashboard. A page that left in that time got a state listener and a place in the open pages table, and nothing ended them. The handler now puts a stand-in into the page's subscriptions, which Home Assistant removes when the page closes.
 - **Two dashboard saves close together leave each page with the newer entities.** Two such saves could leave a page with the older entity set. The changes to the open pages now run one after the other.
-- **A new page no longer waits with no end when state filtering fails.** Before, a failure inside the task of a filtered state subscription sent the page no result and no error, and the page waited with no end. The page now gets the subscription to all states. If that fails too, the page gets the error message that Home Assistant sends for a failed handler.
+- **A new page no longer waits with no end when entity filtering fails.** Before, a failure inside the task of a filtered state subscription sent the page no result and no error, and the page waited with no end. The page now gets the subscription to all states. If that fails too, the page gets the error message that Home Assistant sends for a failed handler.
 - **A failure for one page no longer stops the update of the other pages.** A failed entity scan now leaves each open page as it is. Before, an error for one page ended the update for each later page, and the adoption after a group change did not run.
 - **The log says when this Home Assistant version has internals that the adoption cannot read.** The search for early state subscriptions reads the listener table of the event bus and the function `_forward_entity_changes`. On a version without them the search found nothing and the log held nothing. The setup now writes one warning to the log. The search also catches each kind of error at the read, and it takes that function only from the Home Assistant module that defines it.
 - **A setup of the integration during Home Assistant's start still updates the pages at the end of the start.** The update at the end of the start depended on `hass.is_running`. That property is also true while Home Assistant starts, so a setup in that time added no listener. The setup now uses `async_at_started`.
@@ -269,11 +276,11 @@ A second review found faults in this version, and 0.3.6 corrects them. The large
 
 ### A group's entities
 
-- **A dashboard with no stored configuration no longer leaves a page with only two entities. (high)** Home Assistant generates such a dashboard in the browser, such as the default dashboard before its first edit. The entity scan read it as an empty dashboard, so a page got only `sun.sun` and `zone.home`, with no line in the log. State filtering is now off for such a group, and the log says why once. The same holds when no dashboard in the group exists. A deleted dashboard beside a stored one is left out, with one warning.
-- **A strategy turns state filtering off for its group.** A dashboard, a view or a section with a strategy holds no card: the browser makes them. A page that showed such a dashboard got no entity for those cards. The entity scan also read the area view strategy as an area card.
-- **Core cards that find their entities by themselves now show them.** The `home-summary` card and the energy, water, power and gas cards and badges take their entities from all states or from the energy settings, so state filtering is off for a group with one of them. A `map` card with `show_all` gets each person, device tracker and zone, and with `geo_location_sources` each geo location entity. The `updates` card gets each update entity. A tile card for a person, and a visibility condition on the user's location, get each zone.
+- **A dashboard with no stored configuration no longer leaves a page with only two entities. (high)** Home Assistant generates such a dashboard in the browser, such as the default dashboard before its first edit. The entity scan read it as an empty dashboard, so a page got only `sun.sun` and `zone.home`, with no line in the log. Entity filtering is now off for such a group, and the log says why once. The same holds when no dashboard in the group exists. A deleted dashboard beside a stored one is left out, with one warning.
+- **A strategy turns entity filtering off for its group.** A dashboard, a view or a section with a strategy holds no card: the browser makes them. A page that showed such a dashboard got no entity for those cards. The entity scan also read the area view strategy as an area card.
+- **Core cards that find their entities by themselves now show them.** The `home-summary` card and the energy, water, power and gas cards and badges take their entities from all states or from the energy settings, so entity filtering is off for a group with one of them. A `map` card with `show_all` gets each person, device tracker and zone, and with `geo_location_sources` each geo location entity. The `updates` card gets each update entity. A tile card for a person, and a visibility condition on the user's location, get each zone.
 - **The integration sends the person entity of each user in a group.** The frontend finds the logged-in user's person by a search of all states, for a location condition and for the user's picture.
-- **The entity scan finds an entity ID directly after a line break or a tab.** The entity scan now reads a dashboard's values, and not its JSON text. In JSON text, a line break or a tab inside a string is a backslash and a letter, which hid the entity ID after it. A value that JSON does not know, such as a date with no quotes in a YAML dashboard, made the entity scan fail. That failure turned state filtering off for the group, with an error at each page reload.
+- **The entity scan finds an entity ID directly after a line break or a tab.** The entity scan now reads a dashboard's values, and not its JSON text. In JSON text, a line break or a tab inside a string is a backslash and a letter, which hid the entity ID after it. A value that JSON does not know, such as a date with no quotes in a YAML dashboard, made the entity scan fail. That failure turned entity filtering off for the group, with an error at each page reload.
 - **An action's name, such as `light.turn_on`, no longer counts as an entity.** Such a name with no state went into a state subscription's list. Each other entity ID with no state stays, because its first state can come later.
 - **The default dashboard is the dashboard `lovelace` when it exists.** Home Assistant 2026.11 takes that dashboard for a request with no URL path, before the dashboard with the key `None`. The entity scan, the resource scan and the update after a save now do the same.
 
@@ -294,9 +301,9 @@ A second review found faults in this version, and 0.3.6 corrects them. The large
 
 ### The form, the action and the checks
 
-- **Only administrators can call `lite_resources.preview`.** Before, each logged-in user could call it, and it names each group, each user, each dashboard and each entity in the dashboards. The preview now also says why state filtering or resource filtering is off for a group.
+- **Only administrators can call `lite_resources.preview`.** Before, each logged-in user could call it, and it names each group, each user, each dashboard and each entity in the dashboards. The preview now also says why entity filtering or resource filtering is off for a group.
 - **You can save a group's form after you delete one of its users or dashboards.** Home Assistant refuses a form value that is not among an option's choices. A group with a deleted user, a deleted dashboard or an older version's resource URL could not be saved until that value was removed, and the error did not name it. The form now keeps such a stored value.
-- **The form shows a stored group's state filtering as it is.** For a group with no stored value the form showed state filtering as on, but it is off for such a group. A plain submit then turned it on. The update from a single-group version now also writes state filtering as off when that version did not hold the option.
+- **The form shows a stored group's entity filtering as it is.** For a group with no stored value the form showed entity filtering as on, but it is off for such a group. A plain submit then turned it on. The update from a single-group version now also writes entity filtering as off when that version did not hold the option.
 - **The log names a user that is in two groups.** Two forms that are open at the same time can each add the same user. The first group in the list counts, and the log now says so.
 - A group has a hash. Before, `hash(Group)` raised an error, because the options are a dict.
 - A group's text `reconfigure_successful` is gone. Home Assistant shows its own text after a change to a group.
@@ -307,7 +314,7 @@ A second review found faults in this version, and 0.3.6 corrects them. The large
 ### Limits that stay
 
 - **A new member of a light group or of a schedule reaches an open page only later.** A light group's new member, and a new entity that a schedule controls, reach an open page at its next page reload, at its dashboard's next save, or at a registry's next change.
-- **State filtering holds for each program that logs in as a lite user.** The integration knows a connection's user and not its program. A companion app or a script that logs in as a lite user and asks for all states gets only the entities on the dashboards.
+- **Entity filtering holds for each program that logs in as a lite user.** The integration knows a connection's user and not its program. A companion app or a script that logs in as a lite user and asks for all states gets only the entities on the dashboards.
 - **The integration cannot find the entities of a custom card that selects them in the browser.** `auto-entities` with a domain filter, the entity list in the scheduler card's editor, and a template that builds an entity ID from a variable name no entity in the dashboard. Add those entities under **Extra entities**.
 - **An administrator who is a lite user** also sees the filtered resource list under **Settings**, **Dashboards**, **Resources**.
 - **A YAML dashboard** fires no event when its file changes. Its open pages get the new entities when a page loads the dashboard again.
@@ -318,7 +325,7 @@ A second review found faults in this version, and 0.3.6 corrects them. The large
 
 ## 0.3.4 - 2026-11-23
 
-- **State filtering survives a Home Assistant restart.** After a restart, a page reconnects within seconds, before Home Assistant sets a custom integration up. Home Assistant's handler then answered the page's state subscription, with every entity. On one device the page went from 95 entities to 5,573, and it fell more than 200 seconds behind for 10 minutes, until its connection broke. The integration now finds such a state subscription when its setup runs, and it filters the subscription in place. The page drops the entities that its dashboards do not show, and it keeps its connection.
+- **Entity filtering survives a Home Assistant restart.** After a restart, a page reconnects within seconds, before Home Assistant sets a custom integration up. Home Assistant's handler then answered the page's state subscription, with every entity. On one device the page went from 95 entities to 5,573, and it fell more than 200 seconds behind for 10 minutes, until its connection broke. The integration now finds such a state subscription when its setup runs, and it filters the subscription in place. The page drops the entities that its dashboards do not show, and it keeps its connection.
 - Each open page of a user that joins a group becomes a filtered page immediately, in the same way.
 - The search for those state subscriptions reads internals of Home Assistant 2026.11: the listener list of the event bus. On a version with another layout it finds nothing, and a page then gets its filtered state subscription at its next connection, as before. The search takes the listener function only from the Home Assistant module that defines it.
 - A second commit of this version, `57bf290`, tried to return a page to all states when its filtered state subscription failed.
@@ -352,7 +359,7 @@ A second review found faults in this version, and 0.3.6 corrects them. The large
 - A page loads a card type that is new on a dashboard at its next page reload. The frontend loads its resources once for each page reload.
 - **Always include** and **Always exclude** are optional overrides, and the form says so. A group's resources come from its dashboards.
 - An Advanced Camera Card camera with `live_provider: webrtc-card` keeps the WebRTC Camera integration's resource, `webrtc-camera.js`. No card type in the dashboard names that resource.
-- `lite_resources.preview` lists each group with its users, and the number of open pages with filtered states.
+- `lite_resources.preview` lists each group with its users, and the number of open pages with entity filtering.
 - An update event that names no dashboard, such as a change to the resource list, updates no page. Such an event has no URL path, and the default dashboard has the URL path `None`, so the two are kept apart.
 - The manifest and the README name this fork, `ColColonCleaner/ha-lite-resources`, for the documentation, the issue tracker and the install. The README says that the repository is a fork of `evski/ha-lite-resources`, and it gives the install through the Marketplace in Home Assistant 2026.11.
 - The repository tracked one test's Python bytecode file, and each test run changed it. Git now ignores each `__pycache__` folder.

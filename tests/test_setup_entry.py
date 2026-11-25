@@ -552,7 +552,7 @@ class SetupEntryTest(unittest.IsolatedAsyncioTestCase):
         await self._open_page("u-w1")
         preview = self.hass.services.registered[("lite_resources", "preview")]
         response = await preview(_call())
-        self.assertEqual(response["open_pages_with_filtered_states"], 1)
+        self.assertEqual(response["open_pages_with_filtered_entities"], 1)
         workshop, kitchen = response["groups"]
         self.assertEqual(workshop["group"], "Workshop kiosks")
         self.assertEqual(workshop["users"], ["Workshop Kiosk 1", "Workshop Kiosk 2"])
@@ -823,7 +823,9 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kiosk.after_close, [(5, None)])
         self.assertEqual(self.hass.bus._listeners.get("state_changed", []), [])
         preview = self.hass.services.registered[("lite_resources", "preview")]
-        self.assertEqual((await preview(_call()))["open_pages_with_filtered_states"], 0)
+        self.assertEqual(
+            (await preview(_call()))["open_pages_with_filtered_entities"], 0
+        )
 
     async def test_page_that_waits_for_the_scan_is_narrowed(self) -> None:
         self.hass.scan_suspends = 2
@@ -1047,7 +1049,9 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         self.hass.scan_error = _entry.CannotNarrow("the dashboard holds a strategy")
         preview = self.hass.services.registered[("lite_resources", "preview")]
         (group,) = (await preview(_call()))["groups"]
-        self.assertEqual(group["states_not_filtered"], "the dashboard holds a strategy")
+        self.assertEqual(
+            group["entities_not_filtered"], "the dashboard holds a strategy"
+        )
         self.assertNotIn("state_entities", group)
 
     async def test_unload_keeps_the_handler_of_another_integration(self) -> None:
@@ -1126,7 +1130,9 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kiosk.results, [(5, None)])
         # The new setup holds the page, so it follows a changed dashboard.
         preview = self.hass.services.registered[("lite_resources", "preview")]
-        self.assertEqual((await preview(_call()))["open_pages_with_filtered_states"], 1)
+        self.assertEqual(
+            (await preview(_call()))["open_pages_with_filtered_entities"], 1
+        )
 
     async def test_page_whose_scan_is_open_at_the_unload_goes_to_a_later_handler(
         self,
@@ -1318,7 +1324,9 @@ class OpenPageSafetyTest(unittest.IsolatedAsyncioTestCase):
         (call,) = self._calls("u-w1")
         self.assertIsNone(call["entity_ids"])
         preview = self.hass.services.registered[("lite_resources", "preview")]
-        self.assertEqual((await preview(_call()))["open_pages_with_filtered_states"], 0)
+        self.assertEqual(
+            (await preview(_call()))["open_pages_with_filtered_entities"], 0
+        )
 
     async def _resources(self, user_id: str):
         connection = _Connection(user_id)
@@ -1583,7 +1591,7 @@ class MigrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dict(group.data), options)
 
     async def test_setup_with_no_state_filter_option_keeps_the_filter_off(self) -> None:
-        # A version with no such option did not filter the states. A group's form shows
+        # A version with no such option had no entity filtering. A group's form shows
         # a missing option as on, so the group states that it is off.
         entry = _Entry(
             version=1, options={"users": ["u-w1"], "dashboards": ["dashboard-workshop"]}

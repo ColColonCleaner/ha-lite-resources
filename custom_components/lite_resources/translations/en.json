@@ -78,7 +78,7 @@
   "services": {
     "preview": {
       "name": "Preview",
-      "description": "For administrators. For each group, this action shows the resources that the group's pages get and those that they do not get. It shows each card type for which the resource scan finds no resource file. When state filtering is on for a group, it also shows the entities that the group's pages get. It also gives the reason when state filtering or resource filtering is off for a group."
+      "description": "For administrators. For each group, this action shows the resources that the group's pages get and those that they do not get. It shows each card type for which the resource scan finds no resource file. When entity filtering is on for a group, it also shows the entities that the group's pages get. It also gives the reason when entity filtering or resource filtering is off for a group."
     }
   }
 }

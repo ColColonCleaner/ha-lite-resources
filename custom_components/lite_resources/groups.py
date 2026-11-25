@@ -76,7 +76,7 @@ class Group:
 
     @property
     def filter_states(self) -> bool:
-        """True when state filtering is on for the group."""
+        """True when entity filtering is on for the group."""
         return bool(self.options.get(CONF_FILTER_STATES))
 
 

@@ -97,7 +97,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.version == 1:
         data = legacy_group_data(entry.options)
         if data is not None and not groups_from_subentries(entry.subentries):
-            # A single-group version with no such option did not filter the states. A
+            # A single-group version with no such option had no entity filtering. A
             # group's form shows a missing option as on, so the group states it.
             data.setdefault(CONF_FILTER_STATES, False)
             hass.config_entries.async_add_subentry(
@@ -191,7 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Return the entities for a group's state subscription.
 
         None means that the group's dashboards do not say which entities a page needs, so
-        state filtering is off for the group. The set holds also each entity ID with no
+        entity filtering is off for the group. The set holds also each entity ID with no
         state now, so that a page gets an entity whose first state comes after the page
         connected.
 
@@ -258,7 +258,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             warn_change(
                 key,
                 str(err),
-                "State filtering is off for group %s: %s",
+                "Entity filtering is off for group %s: %s",
                 group.name,
                 err,
             )
@@ -454,7 +454,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connection: websocket_api.ActiveConnection,
         msg: dict[str, Any],
     ) -> None:
-        # State filtering applies only to the frontend's subscription to all states,
+        # Entity filtering applies only to the frontend's subscription to all states,
         # which has no entity list and no include or exclude filter. After the
         # unload, another integration can still call this handler: it then changes
         # nothing.
@@ -617,7 +617,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         current, user.id if user is not None else None
                     )
                     if group is None or not group.filter_states:
-                        # The user left its group, or state filtering is off for the
+                        # The user left its group, or entity filtering is off for the
                         # group now.
                         live.update(item, None)
                         continue
@@ -703,7 +703,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         )
                 except Exception:  # the other pages still get their change
                     _LOGGER.exception(
-                        "The state filtering of an open page of a lite user failed"
+                        "The entity filtering of an open page of a lite user failed"
                     )
 
     async def update_pages(only: set[str] | None = None) -> None:
@@ -842,7 +842,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         hass, options, include_missing=True
                     )
                 except CannotNarrow as err:
-                    item["states_not_filtered"] = str(err)
+                    item["entities_not_filtered"] = str(err)
                 else:
                     item["state_entities"] = sorted(entities)
                     item["state_entities_count"] = (
@@ -853,7 +853,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # ID with an error.
                     item["state_entities_without_state"] = sorted(subscribed - entities)
             response.append(item)
-        return {"groups": response, "open_pages_with_filtered_states": len(live)}
+        return {"groups": response, "open_pages_with_filtered_entities": len(live)}
 
     # The answer names each user and each entity in the dashboards, so only an
     # administrator can call the action.
@@ -895,7 +895,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not returned and item.msg["id"] in item.connection.subscriptions:
                 user = item.connection.user
                 _LOGGER.error(
-                    "An open page of %s keeps its filtered states until it reconnects",
+                    "An open page of %s keeps entity filtering until it reconnects",
                     user.name if user is not None else "an unknown user",
                 )
 

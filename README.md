@@ -11,8 +11,6 @@
 
 This repository is a fork of version 0.2.1 of [evski/ha-lite-resources](https://github.com/evski/ha-lite-resources). The fork needs Home Assistant 2026.11 or later. On an older version, use the original, which needs Home Assistant 2025.1 or later. The [changelog](CHANGELOG.md) describes each change in full.
 
-**Resource filtering** sends a slow device only the resources that its dashboards need. A resource is an entry in Home Assistant's list of dashboard resources, and in most cases it names the JavaScript file of a custom card. **State filtering** sends that device only the states of the entities that its dashboards show. The integration finds those resources with a **resource scan** of the dashboards, and those entities with an **entity scan**. A **page** is one browser tab or app window that shows Home Assistant.
-
 ### Added features
 
 - **Each set of devices can have its own dashboards.** A [group](#groups) holds the users that one set of devices logs in as, and the dashboards that those devices show.
@@ -20,7 +18,7 @@ This repository is a fork of version 0.2.1 of [evski/ha-lite-resources](https://
 - **The entities of a saved dashboard reach the open pages immediately.** When you save a dashboard or change a group, each open page of the group gets the states of the new entities without a page reload. Only a custom card type that is new to the dashboards needs one page reload.
 - **An edit to the file of a YAML dashboard reaches the open pages when a page next opens that dashboard.** Home Assistant reads the file again at that time. Each open page of a group with that dashboard then gets the states of the new entities.
 - **Entity and resource scans now have a timeout, and entity scans have retries.** An entity scan or a resource scan that hangs no longer blocks a page for more than 30 seconds. The integration retries a failed entity scan automatically, up to 6 times. Until the entity scan succeeds, a page that connects gets all states. Until the resource scan succeeds, a page that loads gets all resources.
-- **The action `lite_resources.preview` shows what each group gets.** For each group, the action shows the resources and the entities that the group's pages get. It also shows the reason when state filtering or resource filtering is off.
+- **The action `lite_resources.preview` shows what each group gets.** For each group, the action shows the resources and the entities that the group's pages get. It also shows the reason when entity filtering or resource filtering is off.
 - **The group form validates its input.** The form rejects a group with no name, no user or no dashboard. It also rejects a user that is already in another group.
 - **Unit tests and static checks cover the integration.** `ruff` runs the static checks, and `mypy` runs the type checks. One script runs the full validation before a commit, and a workflow makes each release.
 
@@ -28,16 +26,16 @@ This repository is a fork of version 0.2.1 of [evski/ha-lite-resources](https://
 
 Version 0.2.1 of the original had these faults, and this fork corrects them.
 
-- **State filtering survives a Home Assistant restart.** After a restart, a page can reconnect before Home Assistant sets the integration up. In the original, such a page got all states until its next page reload.
+- **Entity filtering survives a Home Assistant restart.** After a restart, a page can reconnect before Home Assistant sets the integration up. In the original, such a page got all states until its next page reload.
 - **The area card, the scheduler card and the map card show their entities.** These cards find their entities themselves, and the stored dashboard does not list those entities. The original sent no states for them.
 - **An entity that gets its first state late still shows on the page.** The original left out an entity that had no state yet when the page connected, such as an entity of an integration that starts slowly.
-- **A dashboard that does not list its entities now shows all of them.** Home Assistant builds some dashboards automatically, such as the default dashboard before its first edit. For such a dashboard, the original sent the states of only two entities, `sun.sun` and `zone.home`, and the log said nothing. For a card that reads all entities, such as an energy card, the original sent no states for that card. This fork sends all states to the group of such a dashboard, and the log says why. See [When state filtering is off for a group](#when-state-filtering-is-off-for-a-group).
+- **A dashboard that does not list its entities now shows all of them.** Home Assistant builds some dashboards automatically, such as the default dashboard before its first edit. For such a dashboard, the original sent the states of only two entities, `sun.sun` and `zone.home`, and the log said nothing. For a card that reads all entities, such as an energy card, the original sent no states for that card. This fork sends all states to the group of such a dashboard, and the log says why. See [When entity filtering is off for a group](#when-entity-filtering-is-off-for-a-group).
 - **The choice `Overview (default)` now selects the dashboard that Home Assistant shows as its default.** This choice is in the option **Their dashboards**. When a dashboard with the URL path `lovelace` exists, Home Assistant 2026.11 shows that dashboard as its default, and the original read a different one.
 - **The integration finds an entity in a multi-line template.** The original missed an entity ID that directly follows a line break, so that entity showed as unavailable.
 - **One unreadable resource file no longer turns resource filtering off.** In the original, one unreadable resource file made the integration send every resource at each page reload, with an error in the log. A YAML dashboard whose file is missing did the same. Now an unreadable resource file counts as a resource that the integration cannot read, and the resource scan leaves out a dashboard that Home Assistant cannot load.
 - **Only administrators can perform `lite_resources.preview`.** Its response names users, dashboards and entities, and the original let any user perform it.
 - **You can save the group form after you delete a user or a dashboard in Home Assistant.** The original refused to save the form while it still held the deleted item.
-- **Removing the integration restores all states immediately.** The original left each open page with filtered states until its next page reload.
+- **Removing the integration restores all states immediately.** The original left entity filtering on for each open page until its next page reload.
 - **This fork also corrects five smaller faults.** The integration no longer mistakes a resource on another server for a local file. **Always include** and **Always exclude** now match a resource by its server and its path, where the original matched by the path alone. The resource scan no longer mistakes unrelated text in a file for a card type. Each warning appears in the log once, and not at each page reload. A page that disconnects during an entity scan no longer leaves an unused event listener in Home Assistant until the next restart.
 
 ## What it does
@@ -85,7 +83,7 @@ This integration changes no file on disk, and it patches nothing in the frontend
 1. **Resources.** The frontend asks for the list of dashboard resources (`lovelace/resources`) each time the page loads. Lite users get only the resources that their dashboards use. The integration reads every dashboard that you select, whether or not another dashboard links to it. It collects every `custom:` card type in those dashboards, including the ones inside stacks, sections, conditional cards, pop-ups and features. Then it finds the resource files that register those card types. A resource file registers a card type when it gives the browser the code for that type. This work is the **resource scan**. The resource scan also recognises a bundle that builds its card types in code (`mushroom.js` provides `custom:mushroom-*-card`). For that, the whole file name must be the start of the card type. So `dreame-vacuum-card.js` does not count as the Mushroom vacuum card, and `lock-manager.js` does not count as the Mushroom lock card. Some resources change other cards or the page, and have no card type. Such a resource is a mod. The resource scan detects a mod from its key in the dashboard (`card_mod` → card-mod, `kiosk_mode` → kiosk-mode).
 2. **States** (optional). The frontend subscribes to the state of every entity (`subscribe_entities`). For lite users, the integration filters that subscription to the entities that appear anywhere in their dashboards (cards, pop-ups, conditions, actions). It also keeps the members of each entity group, such as a light group, and each entity that you add under **Extra entities**. The work that finds those entities is the **entity scan**.
 
-- The first answer is **resource filtering**, and the second is **state filtering**.
+- The first answer is **resource filtering**, and the second is **entity filtering**.
 - A **page** is one browser tab or app window that shows Home Assistant. Each page has its own connection to Home Assistant.
 
 Everyone else gets Home Assistant's normal behaviour. When you remove the integration, everything is exactly as before. Each open page gets all states again immediately.
@@ -103,9 +101,9 @@ Some cards name no entity, and find their entities themselves. This integration 
 
 Some custom cards select their entities in the browser, so the dashboard names none of them. Examples are `auto-entities` with a domain filter, and a card with a template that builds an entity ID from a variable. The entity list in the scheduler card's editor is a further example. For each of these, add the entities under **Extra entities**.
 
-### When state filtering is off for a group
+### When entity filtering is off for a group
 
-Some dashboards do not list the entities that they show. State filtering is then off for each group with such a dashboard. The pages of that group get all states, as they do without this integration. The log gives the reason once, and `lite_resources.preview` gives it too. Resource filtering stays on for the group. These are the causes:
+Some dashboards do not list the entities that they show. Entity filtering is then off for each group with such a dashboard. The pages of that group get all states, as they do without this integration. The log gives the reason once, and `lite_resources.preview` gives it too. Resource filtering stays on for the group. These are the causes:
 
 - A dashboard that Home Assistant does not store. Home Assistant generates such a dashboard in the browser. The default dashboard before its first edit is an example.
 - A dashboard, a view or a section with a **strategy**. A strategy is a rule that the browser uses to build the cards, so the stored dashboard lists no card and no entity. The same is true for a section with a strategy that is in the sidebar of a view or inside another section.
@@ -115,12 +113,12 @@ Some dashboards do not list the entities that they show. State filtering is then
 
 A custom strategy can make custom cards, and the stored dashboard then names none of them. Add the resource of each such card under **Always include**.
 
-Two faults turn state filtering off for a page that connects while the fault lasts. During such a fault, the entity scan cannot find the entities that the page needs. A page that is already open keeps its entities. The log gives each new reason once.
+Two faults turn entity filtering off for a page that connects while the fault lasts. During such a fault, the entity scan cannot find the entities that the page needs. A page that is already open keeps its entities. The log gives each new reason once.
 
 - A dashboard that Home Assistant cannot load, such as a YAML dashboard with a syntax error. The integration retries the entity scan automatically, about 10 seconds after each failure. After 6 failed retries, the automatic retries stop, and the log says so. The next entity scan then comes when you save a dashboard or change a group, or when a page of the group connects.
 - An entity scan that takes longer than 30 seconds, for example when a YAML dashboard is on a share that does not answer. The integration stops waiting after 30 seconds, and the entity scan goes on. While it runs, the integration starts no other entity scan for the group, unless you change the group. When it ends, the integration starts a new one for the group.
 
-When an entity scan next succeeds, state filtering is on again for each open page of the group. Each page then gets the group's current entities.
+When an entity scan next succeeds, entity filtering is on again for each open page of the group. Each page then gets the group's current entities.
 
 ## Groups
 
@@ -230,11 +228,11 @@ Only an administrator can perform this action, because the response names each u
 
 The response lists each group with its users. For each group it shows the resources that the group's pages get, the resources that they do not get, and each `custom:` card type for which the resource scan finds no resource file. When the group's option **Only send states their dashboards show** is on, it also shows the entities that the group's pages get. The response also holds these keys, which show what to check:
 
-- `states_not_filtered` and `resources_not_filtered` give the reason when state filtering or resource filtering is off for a group.
+- `entities_not_filtered` and `resources_not_filtered` give the reason when entity filtering or resource filtering is off for a group.
 - `guessed_types` holds each card type that no resource file registers in a way that the resource scan can read. For such a type, the integration sends a resource when its file meets two conditions. The file names the type in quotes, and it holds a registration that the resource scan cannot read. If the card still fails to load, add its resource under **Always include**.
 - `excluded_without_element` holds each readable resource file in which the resource scan finds no card type. The integration does not send such a resource. Such a file either does its work with no card, as an icon set does, or it holds a card that the dashboards do not use, with a registration that the resource scan cannot read. Add the resource under **Always include** when a page needs it.
-- `state_entities_without_state` holds each entity ID in the dashboards that has no state now. State filtering keeps those entity IDs, so a page gets each state when it comes. Such an entity ID belongs to an entity whose first state comes later, or it is a typing error in a card.
-- `open_pages_with_filtered_states` holds the number of open pages that have state filtering now.
+- `state_entities_without_state` holds each entity ID in the dashboards that has no state now. Entity filtering keeps those entity IDs, so a page gets each state when it comes. Such an entity ID belongs to an entity whose first state comes later, or it is a typing error in a card.
+- `open_pages_with_filtered_entities` holds the number of open pages that have entity filtering now.
 
 ## FAQ
 
@@ -248,7 +246,7 @@ Per user. If you log in as a lite user on your phone, you get only the resources
 Yes. Add one group for each set. Each group gets the resources and the states for its own dashboards.
 
 **Something shows "unavailable" or a card fails to load on the device.**
-With state filtering on, the integration does not send the states of entities that are not on the device's dashboards. Add them under **Extra entities**. If they are on a dashboard that the group does not hold, add that dashboard under **Their dashboards**. For a card that fails to load, perform `lite_resources.preview`, find the card type in the response, and add its resource under **Always include**. To keep a resource from a device that never uses it, add it under **Always exclude**.
+With entity filtering on, the integration does not send the states of entities that are not on the device's dashboards. Add them under **Extra entities**. If they are on a dashboard that the group does not hold, add that dashboard under **Their dashboards**. For a card that fails to load, perform `lite_resources.preview`, find the card type in the response, and add its resource under **Always include**. To keep a resource from a device that never uses it, add it under **Always exclude**.
 
 **Does it affect voice assistants, automations, history or the companion app's sensors?**
 No, as long as nothing but the device logs in as its lite user. The integration changes only the list of dashboard resources and the live state subscription, and only for lite users. The integration knows the user of a connection, but not the program that opened it. So another program that logs in as a lite user and asks for all states also gets only the entities on the group's dashboards. Give each device a user of its own, and use that user for nothing else.
@@ -257,7 +255,7 @@ No, as long as nothing but the device logs in as its lite user. The integration 
 **Settings → Dashboards → Resources** then shows only the resources of the group, because it reads the filtered list of dashboard resources. Use another user to manage the resources.
 
 **What happens if something goes wrong?**
-The resource scan can fail with an error, or take longer than 30 seconds. The integration then sends the full resource list and writes the reason to the log. If the entity scan fails, a page that connects gets all states, and an open page keeps its entities. See [When state filtering is off for a group](#when-state-filtering-is-off-for-a-group) for what comes next.
+The resource scan can fail with an error, or take longer than 30 seconds. The integration then sends the full resource list and writes the reason to the log. If the entity scan fails, a page that connects gets all states, and an open page keeps its entities. See [When entity filtering is off for a group](#when-entity-filtering-is-off-for-a-group) for what comes next.
 
 Some gaps give no error. A card type that no resource file seems to register appears in the log once, and `lite_resources.preview` shows it. A resource such as an icon set, or a mod that only a theme uses, has no card type in a dashboard. The integration does not send such a resource until you add it under **Always include**.
 
@@ -317,7 +315,7 @@ This repository uses one word for one thing in each of its texts: this README, t
 | An entry of Home Assistant's list of dashboard resources | **resource**, and its file is the **resource file** | card file, script |
 | The integration reads a group's dashboards to find the entities that they show | **entity scan** | scan alone |
 | The integration reads a group's dashboards and resource files to find the resources that the dashboards use | **resource scan** | scan alone |
-| The integration sends a page only the states of its group's entities | **state filtering** | narrow, limit |
+| The integration sends a page only the states of its group's entities | **entity filtering** | state filtering, narrow, limit |
 | The integration sends a page only its group's resources | **resource filtering** | reduce, trim |
 | The integration, in each of its versions, as the thing that acts | **this integration**, or `ha-lite-resources` | its display name, which stands only where a step names what Home Assistant shows |
 | The version of the integration in this repository, where a text compares it with the original | **this fork** | this integration |

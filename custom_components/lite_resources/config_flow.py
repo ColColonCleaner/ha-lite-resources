@@ -74,8 +74,8 @@ async def _async_group_schema(
 ) -> vol.Schema:
     """Return one group's form, with `current` as the values that it shows.
 
-    State filtering is on for a new group. A stored group with no such value does not
-    filter the states, so its form shows state filtering as off.
+    Entity filtering is on for a new group. It is off for a stored group with no such
+    value, so the form of that group shows it as off.
     """
     all_users = [u for u in await hass.auth.async_get_users() if not u.system_generated]
     users = [
